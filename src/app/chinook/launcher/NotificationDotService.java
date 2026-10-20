@@ -64,6 +64,18 @@ public class NotificationDotService extends NotificationListenerService {
         return connected;
     }
 
+    /** Diagnostics for the setup guide: notifications read and apps with a badge. */
+    private static volatile int seenNotifications;
+    private static volatile int appsWithBadges;
+
+    static int seenNotifications() {
+        return seenNotifications;
+    }
+
+    static int appsWithBadges() {
+        return appsWithBadges;
+    }
+
     /** Whether notification access is granted, using the official check (Android 8.1+). */
     static boolean isEnabled(Context context) {
         ComponentName me = new ComponentName(context, NotificationDotService.class);
@@ -108,6 +120,7 @@ public class NotificationDotService extends NotificationListenerService {
         } catch (RuntimeException e) {
             return;
         }
+        seenNotifications = all == null ? 0 : all.length;
         Map<String, Info> next = new HashMap<>();
         Map<String, Boolean> onlySummary = new HashMap<>();
         if (all != null) {
@@ -142,6 +155,7 @@ public class NotificationDotService extends NotificationListenerService {
             active.clear();
             active.putAll(next);
         }
+        appsWithBadges = next.size();
         notifyChanged();
     }
 

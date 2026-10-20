@@ -1278,12 +1278,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                     }
                 })
                 .item(R.drawable.ic_notifications, "Notification badges",
-                        NotificationDotService.isEnabled(this) ? "On" : "Off \u00B7 tap to set up", new Runnable() {
-                    @Override public void run() {
-                        if (NotificationDotService.isEnabled(MainActivity.this)) openNotificationAccessSettings();
-                        else showNotificationAccessSheet();
-                    }
-                })
+                        !NotificationDotService.isEnabled(this) ? "Off \u00B7 tap to set up"
+                                : NotificationDotService.isConnected() ? "Working" : "Not connected \u00B7 tap to fix",
+                        new Runnable() {
+                            @Override public void run() {
+                                showNotificationAccessSheet();
+                            }
+                        })
                 .item(R.drawable.ic_visibility_off, "Hidden apps", hiddenSummary(), new Runnable() {
                     @Override public void run() {
                         showHiddenApps();
@@ -1451,22 +1452,30 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         intro.setPadding(dp(24), 0, dp(24), dp(8));
         sheet.add(intro);
 
-        // Live status, so it's clear which step is left.
+        // Live status, so it's clear which step is left (or which link is broken).
         boolean granted = NotificationDotService.isEnabled(this);
+        boolean connected = granted && NotificationDotService.isConnected();
         LinearLayout status = new LinearLayout(this);
         status.setOrientation(LinearLayout.HORIZONTAL);
         status.setGravity(Gravity.CENTER_VERTICAL);
-        status.setBackground(m3.shape(granted ? m3.primaryContainer : m3.surfaceContainerHighest, 16));
+        status.setBackground(m3.shape(connected ? m3.primaryContainer : m3.surfaceContainerHighest, 16));
         status.setPadding(dp(16), dp(12), dp(16), dp(12));
-        android.widget.ImageView statusIcon = m3.iconView(granted ? R.drawable.ic_check : R.drawable.ic_info,
-                granted ? m3.onPrimaryContainer : m3.onSurfaceVariant, 20);
+        android.widget.ImageView statusIcon = m3.iconView(connected ? R.drawable.ic_check : R.drawable.ic_info,
+                connected ? m3.onPrimaryContainer : m3.onSurfaceVariant, 20);
         ((LinearLayout.LayoutParams) statusIcon.getLayoutParams()).rightMargin = dp(12);
         status.addView(statusIcon);
-        status.addView(m3.text(granted
-                        ? "Notification access is on. Badges appear as new notifications arrive."
+        int seen = NotificationDotService.seenNotifications();
+        int apps = NotificationDotService.appsWithBadges();
+        String working = seen == 0
+                ? "Working. No notifications right now; badges appear as soon as one arrives."
+                : "Working. Chinook can read " + seen + (seen == 1 ? " notification" : " notifications")
+                        + ", with badges on " + apps + (apps == 1 ? " app." : " apps.");
+        status.addView(m3.text(connected ? working : granted
+                        ? "Access is on, but Android hasn't connected Chinook's notification reader yet. "
+                                + "Tap Reconnect below."
                         : "Notification access is still off. Allowing restricted settings only unlocks the "
                                 + "switch \u2014 you still need to turn Chinook on in step " + (Build.VERSION.SDK_INT >= 33 ? 2 : 1) + ".",
-                M3.BODY_MEDIUM, granted ? m3.onPrimaryContainer : m3.onSurface),
+                M3.BODY_MEDIUM, connected ? m3.onPrimaryContainer : m3.onSurface),
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1474,6 +1483,23 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         slp.bottomMargin = dp(8);
         status.setLayoutParams(slp);
         sheet.add(status);
+        if (granted && !connected) {
+            TextView reconnect = m3.filledButton("Reconnect", 0, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    sheet.dismissThen(new Runnable() {
+                        @Override public void run() {
+                            reconnectListener(true);
+                        }
+                    });
+                }
+            });
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.leftMargin = dp(16);
+            rlp.bottomMargin = dp(8);
+            reconnect.setLayoutParams(rlp);
+            sheet.add(reconnect);
+        }
 
         int step = 1;
         if (Build.VERSION.SDK_INT >= 33) {
@@ -1533,14 +1559,53 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
     }
 
-    /** Asks the system to (re)connect the listener if access is granted but it isn't running. */
+    private long lastReconnectAttempt;
+
+    /** If access is granted but the listener isn't running, reconnect it (at most once a minute). */
     private void ensureListenerConnected() {
         if (!NotificationDotService.isEnabled(this) || NotificationDotService.isConnected()) return;
+        if (System.currentTimeMillis() - lastReconnectAttempt < 60_000) return;
+        reconnectListener(false);
+    }
+
+    /**
+     * Asks Android to bind the listener; if it still isn't connected shortly after, disables and
+     * re-enables the service component, which forces a fresh bind (the same as switching access off
+     * and on). Needed after installs/updates, when Android sometimes doesn't bind the listener.
+     */
+    private void reconnectListener(final boolean report) {
+        lastReconnectAttempt = System.currentTimeMillis();
+        final ComponentName component = new ComponentName(this, NotificationDotService.class);
         try {
-            android.service.notification.NotificationListenerService.requestRebind(
-                    new ComponentName(this, NotificationDotService.class));
+            android.service.notification.NotificationListenerService.requestRebind(component);
         } catch (RuntimeException ignored) {
         }
+        if (report) Toast.makeText(this, "Reconnecting\u2026", Toast.LENGTH_SHORT).show();
+        root.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (!NotificationDotService.isConnected()) {
+                    PackageManager pm = getPackageManager();
+                    try {
+                        pm.setComponentEnabledSetting(component,
+                                PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+                        pm.setComponentEnabledSetting(component,
+                                PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+                root.postDelayed(new Runnable() {
+                    @Override public void run() {
+                        boolean ok = NotificationDotService.isConnected();
+                        refreshDots();
+                        if (settingsPage != null) buildSettings();
+                        if (!report) return;
+                        Toast.makeText(MainActivity.this, ok ? "Connected. Badges are working."
+                                : "Still not connected. Try switching Chinook's notification access off and on, "
+                                        + "or restart your phone.", Toast.LENGTH_LONG).show();
+                    }
+                }, 2500);
+            }
+        }, 2000);
     }
 
     private void onReturnFromNotificationSettings() {
@@ -1690,12 +1755,12 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 }));
         final boolean badgesOn = NotificationDotService.isEnabled(this);
         c.addView(m3.listItem(R.drawable.ic_notifications, null, "Notification badges",
-                badgesOn ? (NotificationDotService.isConnected() ? "On \u00B7 counts show on every app"
-                        : "Access granted \u00B7 connecting") : "Off \u00B7 tap to set up", null,
+                badgesOn ? (NotificationDotService.isConnected()
+                        ? "Working \u00B7 reading " + NotificationDotService.seenNotifications() + " notifications"
+                        : "Access on, not connected \u00B7 tap to fix") : "Off \u00B7 tap to set up", null,
                 run(new Runnable() {
                     @Override public void run() {
-                        if (badgesOn) openNotificationAccessSettings();
-                        else showNotificationAccessSheet();
+                        showNotificationAccessSheet();
                     }
                 })));
 
