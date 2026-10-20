@@ -1,12 +1,16 @@
 package app.cascade.launcher;
 
 import android.app.Activity;
+import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.app.SearchManager;
 import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -14,7 +18,6 @@ import android.content.pm.ShortcutInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Rect;
-import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -29,9 +32,11 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.format.DateFormat;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -39,36 +44,50 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.animation.DecelerateInterpolator;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.PopupMenu;
+import android.widget.ScrollView;
 import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity implements AppRepository.Listener,
         AlphabetScrollerView.Listener, NotificationDotService.Listener {
 
-    private static final int ACCENT = 0xFF8AB4FF;
-    private static final int TEXT_SHADOW = 0x99000000;
     private static final int MAX_SHORTCUTS = 5;
+    private static final int REQUEST_HOME_ROLE = 1;
+
+    private static final int STYLE_HOME = 0;
+    private static final int STYLE_PANEL = 1;
+    private static final int STYLE_DRAWER = 2;
 
     private Prefs prefs;
+    private Theme theme;
     private AppRepository repo;
+    private WidgetController widgets;
     private float density;
 
     private List<AppInfo> rawApps = new ArrayList<>();
@@ -80,7 +99,22 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private FrameLayout root;
     private LinearLayout home;
     private View clockBlock;
+    private TextView alarmView;
+    private HorizontalScrollView worldScroll;
+    private LinearLayout worldRow;
+    private final List<TextView> worldOffsetViews = new ArrayList<>();
+    private ScrollView widgetScroll;
+    private LinearLayout widgetContainer;
     private LinearLayout favoritesContainer;
+    private View editBar;
+
+    private FrameLayout panelLayer;
+    private ScrollView panelScroll;
+    private LinearLayout panelList;
+    private boolean panelOpen;
+    private String panelLetter;
+    private View highlightedRow;
+
     private FrameLayout drawer;
     private LinearLayout drawerContent;
     private EditText search;
@@ -89,14 +123,25 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private AlphabetScrollerView scroller;
 
     private boolean drawerOpen;
+    private boolean editMode;
     private GestureDetector homeGestures;
     private GestureDetector drawerGestures;
     private boolean gestureStreamIgnored;
+    private boolean receiverRegistered;
+
+    private final BroadcastReceiver timeReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            updateWorldOffsets();
+            updateAlarm();
+        }
+    };
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         density = getResources().getDisplayMetrics().density;
         prefs = new Prefs(this);
+        theme = Theme.forId(prefs.theme());
+        Fonts.init(this, prefs.bundledFont());
         repo = new AppRepository(this);
 
         getWindow().getDecorView().setSystemUiVisibility(
@@ -108,6 +153,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         setContentView(root);
         setupGestures();
 
+        widgets = new WidgetController(this, prefs, theme, widgetContainer);
+        widgets.render();
+        renderWorldClocks();
+        updateAlarm();
+
         favorites = prefs.favorites();
         repo.start(this);
         NotificationDotService.setListener(this);
@@ -116,6 +166,31 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             prefs.setAskedDefault();
             requestDefaultLauncher();
         }
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        widgets.startListening();
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_TIME_TICK);
+        f.addAction(Intent.ACTION_TIME_CHANGED);
+        f.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+        f.addAction(Intent.ACTION_DATE_CHANGED);
+        f.addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(timeReceiver, f, Context.RECEIVER_EXPORTED);
+        else registerReceiver(timeReceiver, f);
+        receiverRegistered = true;
+        updateWorldOffsets();
+        updateAlarm();
+    }
+
+    @Override protected void onStop() {
+        widgets.stopListening();
+        if (receiverRegistered) {
+            unregisterReceiver(timeReceiver);
+            receiverRegistered = false;
+        }
+        super.onStop();
     }
 
     @Override protected void onDestroy() {
@@ -131,36 +206,49 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // Home pressed while we are already in front: go back to the home page.
+        // Home pressed while already in front: return to a clean home page.
+        hidePanel(true);
         if (drawerOpen) closeDrawer(true);
+        if (editMode) setEditMode(false);
     }
 
     @Override public void onBackPressed() {
-        if (drawerOpen) closeDrawer(true);
+        if (panelOpen) hidePanel(true);
+        else if (drawerOpen) closeDrawer(true);
+        else if (editMode) setEditMode(false);
         // A launcher never finishes on back.
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        widgets.onActivityResult(requestCode, resultCode);
     }
 
     // ---------------------------------------------------------------- UI
 
     private void buildUi() {
         root = new FrameLayout(this);
-        GradientDrawable scrim = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x40000000, 0x00000000, 0x00000000, 0x59000000});
-        root.setBackground(scrim);
+        if (theme.solidBackground != 0) {
+            root.setBackgroundColor(theme.solidBackground);
+        } else {
+            root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{theme.scrimTop, mix(theme.scrimTop, theme.scrimBottom), theme.scrimBottom}));
+        }
 
-        // Home page: clock + date at top, favorites lower down within thumb reach.
         home = new LinearLayout(this);
         home.setOrientation(LinearLayout.VERTICAL);
 
-        LinearLayout clockLayout = new LinearLayout(this);
-        clockLayout.setOrientation(LinearLayout.VERTICAL);
-        clockLayout.setPadding(dp(8), 0, 0, 0);
+        // Clock, date and next alarm.
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(8), 0, 0, 0);
         TextClock clock = new TextClock(this);
         clock.setFormat12Hour("h:mm");
         clock.setFormat24Hour("H:mm");
-        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 64);
-        clock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        styleOnWallpaper(clock);
+        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 68);
+        clock.setTypeface(Fonts.light);
+        clock.setIncludeFontPadding(false);
+        styleText(clock, theme.text);
         clock.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 safeStart(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
@@ -170,49 +258,114 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         date.setFormat12Hour("EEEE, MMMM d");
         date.setFormat24Hour("EEEE, MMMM d");
         date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        styleOnWallpaper(date);
+        date.setTypeface(Fonts.regular);
+        styleText(date, theme.text);
         date.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 safeStart(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR));
             }
         });
-        clockLayout.addView(clock, wrap());
-        clockLayout.addView(date, wrap());
-        clockBlock = clockLayout;
-        LinearLayout.LayoutParams clockLp = wrap();
-        clockLp.topMargin = dp(48);
-        home.addView(clockLayout, clockLp);
+        alarmView = new TextView(this);
+        alarmView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        alarmView.setTypeface(Fonts.regular);
+        alarmView.setCompoundDrawablePadding(dp(6));
+        alarmView.setGravity(Gravity.CENTER_VERTICAL);
+        styleText(alarmView, theme.textSecondary);
+        alarmView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                safeStart(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
+            }
+        });
+        header.addView(clock, wrap());
+        LinearLayout.LayoutParams dateLp = wrap();
+        dateLp.topMargin = dp(2);
+        header.addView(date, dateLp);
+        LinearLayout.LayoutParams alarmLp = wrap();
+        alarmLp.topMargin = dp(4);
+        header.addView(alarmView, alarmLp);
+        clockBlock = header;
+        LinearLayout.LayoutParams headerLp = wrap();
+        headerLp.topMargin = dp(40);
+        home.addView(header, headerLp);
 
-        home.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
+        // World clocks.
+        worldScroll = new HorizontalScrollView(this);
+        worldScroll.setHorizontalScrollBarEnabled(false);
+        worldScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        worldRow = new LinearLayout(this);
+        worldRow.setOrientation(LinearLayout.HORIZONTAL);
+        worldRow.setPadding(dp(8), 0, 0, 0);
+        worldScroll.addView(worldRow);
+        LinearLayout.LayoutParams worldLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        worldLp.topMargin = dp(22);
+        home.addView(worldScroll, worldLp);
 
+        // Widgets fill the flexible middle and scroll if they overflow.
+        widgetScroll = new ScrollView(this);
+        widgetScroll.setVerticalScrollBarEnabled(false);
+        widgetScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        widgetScroll.setClipToPadding(false);
+        widgetScroll.setPadding(0, dp(24), 0, dp(8));
+        widgetContainer = new LinearLayout(this);
+        widgetContainer.setOrientation(LinearLayout.VERTICAL);
+        widgetScroll.addView(widgetContainer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        home.addView(widgetScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // Favourites, low on the screen within thumb reach.
         favoritesContainer = new LinearLayout(this);
         favoritesContainer.setOrientation(LinearLayout.VERTICAL);
         home.addView(favoritesContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        home.addView(new View(this), new LinearLayout.LayoutParams(1, dp(56)));
+        editBar = buildEditBar();
+        editBar.setVisibility(View.GONE);
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        editLp.topMargin = dp(12);
+        home.addView(editBar, editLp);
+
+        home.addView(new View(this), new LinearLayout.LayoutParams(1, dp(44)));
         root.addView(home, match());
 
-        // App drawer: search + full alphabetical list.
+        // Letter pop-out: the apps for the letter under your finger.
+        panelLayer = new FrameLayout(this);
+        panelLayer.setBackgroundColor(theme.panelBackground);
+        panelLayer.setVisibility(View.GONE);
+        panelLayer.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                hidePanel(true);
+            }
+        });
+        panelScroll = new ScrollView(this);
+        panelScroll.setVerticalScrollBarEnabled(false);
+        panelScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        panelList = new LinearLayout(this);
+        panelList.setOrientation(LinearLayout.VERTICAL);
+        panelScroll.addView(panelList);
+        panelLayer.addView(panelScroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
+        root.addView(panelLayer, match());
+
+        // Full app drawer with search.
         drawer = new FrameLayout(this);
-        drawer.setBackgroundColor(0xE60E1015);
+        drawer.setBackgroundColor(theme.drawerBackground);
         drawer.setVisibility(View.GONE);
         drawerContent = new LinearLayout(this);
         drawerContent.setOrientation(LinearLayout.VERTICAL);
 
         search = new EditText(this);
         search.setHint("Search apps");
-        search.setTextColor(Color.WHITE);
-        search.setHintTextColor(0x99FFFFFF);
+        search.setTextColor(theme.text);
+        search.setHintTextColor(theme.textSecondary);
         search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        search.setTypeface(Fonts.regular);
         search.setSingleLine(true);
         search.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         search.setImeOptions(EditorInfo.IME_ACTION_GO | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-        GradientDrawable searchBg = new GradientDrawable();
-        searchBg.setColor(0x24FFFFFF);
-        searchBg.setCornerRadius(dp(26));
-        search.setBackground(searchBg);
-        search.setPadding(dp(20), dp(12), dp(20), dp(12));
+        search.setBackground(pill(theme.searchBackground, 0));
+        search.setPadding(dp(22), dp(13), dp(22), dp(13));
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
@@ -243,15 +396,15 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         adapter = new DrawerAdapter();
         list.setAdapter(adapter);
         drawerContent.addView(list, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
         drawer.addView(drawerContent, match());
         root.addView(drawer, match());
 
-        // Alphabet strip stays on top of both pages.
+        // The alphabet strip spans the screen so a drag can travel onto the pop-out.
         scroller = new AlphabetScrollerView(this);
-        scroller.setAccentColor(ACCENT);
+        scroller.setColors(theme.text, theme.accent);
+        scroller.setTypeface(Fonts.medium);
         scroller.setListener(this);
-        root.addView(scroller, new FrameLayout.LayoutParams(dp(120), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
+        root.addView(scroller, match());
 
         root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
@@ -259,19 +412,71 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 int top = insets.getSystemWindowInsetTop();
                 int right = insets.getSystemWindowInsetRight();
                 int bottom = insets.getSystemWindowInsetBottom();
-                home.setPadding(dp(20) + left, top, dp(56) + right, bottom);
-                drawerContent.setPadding(dp(16) + left, top + dp(12), dp(52) + right, 0);
+                home.setPadding(dp(20) + left, top, dp(54) + right, bottom);
+                panelScroll.setPadding(dp(20) + left, 0, dp(76) + right, 0);
+                drawerContent.setPadding(dp(16) + left, top + dp(12), dp(50) + right, 0);
                 list.setPadding(0, dp(8), 0, bottom + dp(16));
-                scroller.setPadding(0, top + dp(32), right, bottom + dp(32));
+                scroller.setPadding(0, top + dp(36), right, bottom + dp(36));
                 return insets.consumeSystemWindowInsets();
             }
         });
     }
 
+    private View buildEditBar() {
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(dp(8), 0, 0, 0);
+        bar.addView(editButton("+ Apps", false, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                showFavoritesPicker();
+            }
+        }));
+        bar.addView(editButton("+ Widget", false, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                widgets.showPicker();
+            }
+        }));
+        bar.addView(editButton("+ Clock", false, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                showZonePicker();
+            }
+        }));
+        bar.addView(editButton("Done", true, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                setEditMode(false);
+            }
+        }));
+        scroll.addView(bar);
+        return scroll;
+    }
+
+    private TextView editButton(String text, boolean primary, View.OnClickListener click) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setTypeface(Fonts.medium);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(16), dp(9), dp(16), dp(9));
+        if (primary) {
+            b.setTextColor(theme.solidBackground != 0 || theme.grayscale ? Color.BLACK : 0xFF0E1015);
+            b.setBackground(pill(theme.accent, 0));
+        } else {
+            b.setTextColor(theme.text);
+            b.setBackground(pill(0x1AFFFFFF, theme.textSecondary));
+        }
+        b.setOnClickListener(click);
+        LinearLayout.LayoutParams lp = wrap();
+        lp.rightMargin = dp(8);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
     private void setupGestures() {
         homeGestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
-                if (e1 == null) return false;
+                if (e1 == null || editMode) return false;
                 float dy = e2.getY() - e1.getY();
                 float dx = e2.getX() - e1.getX();
                 if (Math.abs(dy) < dp(60) || Math.abs(dy) < Math.abs(dx) * 1.5f) return false;
@@ -281,9 +486,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             }
 
             @Override public void onLongPress(MotionEvent e) {
-                if (hitsChild(favoritesContainer, e) || hitsView(clockBlock, e)) return;
-                root.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
-                showSettings();
+                if (hitsChild(favoritesContainer, e) || hitsView(clockBlock, e) || hitsChild(worldRow, e)
+                        || hitsChild(widgetContainer, e) || hitsView(editBar, e)) return;
+                root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                showHomeMenu();
             }
         });
         drawerGestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
@@ -302,7 +508,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     @Override public boolean dispatchTouchEvent(MotionEvent ev) {
         if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            gestureStreamIgnored = scroller.isInStrip(ev.getX() - scroller.getLeft());
+            gestureStreamIgnored = panelOpen
+                    || scroller.isInStrip(ev.getX())
+                    || (!drawerOpen && widgetContainer.getChildCount() > 0 && hitsChild(widgetContainer, ev));
         }
         if (!gestureStreamIgnored) {
             (drawerOpen ? drawerGestures : homeGestures).onTouchEvent(ev);
@@ -345,7 +553,6 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 new Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")),
                 new Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA),
                 Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY),
-                Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_EMAIL),
         };
         PackageManager pm = getPackageManager();
         List<String> keys = new ArrayList<>();
@@ -369,26 +576,84 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         return keys;
     }
 
+    private void saveFavorites() {
+        prefs.setFavorites(favorites);
+        renderFavorites();
+    }
+
     private void renderFavorites() {
         favoritesContainer.removeAllViews();
         int shown = 0;
-        for (String key : favorites) {
-            AppInfo a = byKey.get(key);
+        for (int i = 0; i < favorites.size(); i++) {
+            AppInfo a = byKey.get(favorites.get(i));
             if (a == null) continue;
-            View row = createRow(true);
-            bindRow(row, a, true);
-            favoritesContainer.addView(row, wrap());
+            LinearLayout row = (LinearLayout) createRow(STYLE_HOME);
+            bindRow(row, a, STYLE_HOME);
+            if (editMode) {
+                addEditControls(row, i);
+                favoritesContainer.addView(row, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            } else {
+                favoritesContainer.addView(row, wrap());
+            }
             shown++;
         }
         if (shown == 0 && appsLoaded) {
             TextView hint = new TextView(this);
-            hint.setText("Drag along the letters on the right to find apps.\nLong-press an app to add it here.");
+            hint.setText(editMode
+                    ? "Tap “+ Apps” to choose your home apps."
+                    : "Slide along the letters on the right to find apps.\nLong-press empty space to customise.");
             hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            hint.setTypeface(Fonts.regular);
             hint.setPadding(dp(8), 0, 0, 0);
-            styleOnWallpaper(hint);
-            hint.setAlpha(0.8f);
+            styleText(hint, theme.textSecondary);
             favoritesContainer.addView(hint, wrap());
         }
+    }
+
+    private void addEditControls(LinearLayout row, final int index) {
+        Row r = (Row) row.getTag();
+        r.label.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        r.dot.setVisibility(View.GONE);
+        if (index > 0) row.addView(controlButton("↑", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Collections.swap(favorites, index, index - 1);
+                saveFavorites();
+            }
+        }));
+        if (index < favorites.size() - 1) row.addView(controlButton("↓", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Collections.swap(favorites, index, index + 1);
+                saveFavorites();
+            }
+        }));
+        row.addView(controlButton("✕", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                favorites.remove(index);
+                saveFavorites();
+            }
+        }));
+    }
+
+    private TextView controlButton(String glyph, View.OnClickListener click) {
+        TextView b = new TextView(this);
+        b.setText(glyph);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        b.setTypeface(Fonts.medium);
+        b.setTextColor(theme.textSecondary);
+        b.setGravity(Gravity.CENTER);
+        b.setBackground(ripple(dp(20)));
+        b.setOnClickListener(click);
+        b.setLayoutParams(new LinearLayout.LayoutParams(dp(40), dp(40)));
+        return b;
+    }
+
+    private void setEditMode(boolean on) {
+        editMode = on;
+        editBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        renderFavorites();
+        renderWorldClocks();
+        if (on) Toast.makeText(this, "Long-press a widget or clock to change it", Toast.LENGTH_SHORT).show();
     }
 
     @Override public void onDotsChanged() {
@@ -401,9 +666,321 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         adapter.notifyDataSetChanged();
     }
 
+    // ------------------------------------------------------ world time
+
+    private void renderWorldClocks() {
+        worldRow.removeAllViews();
+        worldOffsetViews.clear();
+        final List<String> zones = prefs.worldClocks();
+        worldScroll.setVisibility(zones.isEmpty() ? View.GONE : View.VISIBLE);
+        for (final String zone : zones) {
+            LinearLayout item = new LinearLayout(this);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setPadding(0, dp(4), dp(10), dp(4));
+
+            TextView city = new TextView(this);
+            city.setText(WorldClocks.city(zone).toUpperCase(Locale.getDefault()));
+            city.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            city.setLetterSpacing(0.12f);
+            city.setTypeface(Fonts.medium);
+            styleText(city, theme.textSecondary);
+
+            LinearLayout timeRow = new LinearLayout(this);
+            timeRow.setOrientation(LinearLayout.HORIZONTAL);
+            TextClock time = new TextClock(this);
+            time.setTimeZone(zone);
+            time.setFormat12Hour("h:mm a");
+            time.setFormat24Hour("H:mm");
+            time.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21);
+            time.setTypeface(Fonts.regular);
+            styleText(time, theme.text);
+            TextView offset = new TextView(this);
+            offset.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            offset.setTypeface(Fonts.medium);
+            offset.setPadding(dp(3), 0, 0, 0);
+            styleText(offset, theme.accent);
+            offset.setTag(zone);
+            worldOffsetViews.add(offset);
+            timeRow.addView(time, wrap());
+            timeRow.addView(offset, wrap());
+
+            item.addView(city, wrap());
+            item.addView(timeRow, wrap());
+            item.setBackground(ripple(dp(12)));
+            item.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    showWorldClockMenu(zone, v);
+                }
+            });
+            item.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    showWorldClockMenu(zone, v);
+                    return true;
+                }
+            });
+            LinearLayout.LayoutParams lp = wrap();
+            lp.rightMargin = dp(18);
+            worldRow.addView(item, lp);
+        }
+        updateWorldOffsets();
+    }
+
+    private void updateWorldOffsets() {
+        for (TextView v : worldOffsetViews) {
+            int d = WorldClocks.dayOffset((String) v.getTag());
+            v.setText(d > 0 ? "+1" : d < 0 ? "−1" : "");
+        }
+    }
+
+    private void showWorldClockMenu(final String zone, View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        final List<String> zones = prefs.worldClocks();
+        final int index = zones.indexOf(zone);
+        menu.getMenu().add(0, 1, 0, WorldClocks.city(zone) + "  ·  " + WorldClocks.gmtOffset(zone)).setEnabled(false);
+        if (index > 0) menu.getMenu().add(0, 2, 1, "Move left");
+        if (index < zones.size() - 1) menu.getMenu().add(0, 3, 2, "Move right");
+        menu.getMenu().add(0, 4, 3, "Add another city");
+        menu.getMenu().add(0, 5, 4, "Remove");
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override public boolean onMenuItemClick(MenuItem item) {
+                switch (item.getItemId()) {
+                    case 2: Collections.swap(zones, index, index - 1); break;
+                    case 3: Collections.swap(zones, index, index + 1); break;
+                    case 4: showZonePicker(); return true;
+                    case 5: zones.remove(index); break;
+                    default: return true;
+                }
+                prefs.setWorldClocks(zones);
+                renderWorldClocks();
+                return true;
+            }
+        });
+        menu.show();
+    }
+
+    private void showZonePicker() {
+        final List<String> all = WorldClocks.allZones();
+        final List<String> shown = new ArrayList<>(all);
+        final List<String> labels = new ArrayList<>();
+        for (String z : shown) labels.add(zoneLabel(z));
+        final ArrayAdapter<String> zoneAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+        final EditText filter = new EditText(this);
+        filter.setHint("Search city or region");
+        filter.setSingleLine(true);
+        filter.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        box.addView(filter);
+        ListView zoneList = new ListView(this);
+        zoneList.setAdapter(zoneAdapter);
+        box.addView(zoneList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(380)));
+
+        final AlertDialog dialog = dialog()
+                .setTitle("Add world clock")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .create();
+        filter.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) {
+                String q = AppInfo.normalize(s.toString().trim());
+                shown.clear();
+                labels.clear();
+                for (String z : all) {
+                    String label = zoneLabel(z);
+                    if (q.isEmpty() || AppInfo.normalize(label).contains(q)) {
+                        shown.add(z);
+                        labels.add(label);
+                    }
+                }
+                zoneAdapter.notifyDataSetChanged();
+            }
+        });
+        zoneList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                List<String> zones = prefs.worldClocks();
+                String zone = shown.get(position);
+                if (!zones.contains(zone)) zones.add(zone);
+                prefs.setWorldClocks(zones);
+                renderWorldClocks();
+                dialog.dismiss();
+            }
+        });
+        dialog.show();
+    }
+
+    private static String zoneLabel(String zone) {
+        return WorldClocks.city(zone) + ", " + WorldClocks.region(zone) + "  ·  " + WorldClocks.gmtOffset(zone);
+    }
+
+    private void updateAlarm() {
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        AlarmManager.AlarmClockInfo next = am == null ? null : am.getNextAlarmClock();
+        if (next == null || !prefs.showAlarm()) {
+            alarmView.setVisibility(View.GONE);
+            return;
+        }
+        String skeleton = DateFormat.is24HourFormat(this) ? "EEEHm" : "EEEhma";
+        String pattern = DateFormat.getBestDateTimePattern(Locale.getDefault(), skeleton);
+        alarmView.setText(new SimpleDateFormat(pattern, Locale.getDefault()).format(new Date(next.getTriggerTime())));
+        Drawable icon = getDrawable(android.R.drawable.ic_lock_idle_alarm);
+        if (icon != null) {
+            icon = icon.mutate();
+            icon.setTint(theme.textSecondary);
+            icon.setBounds(0, 0, dp(15), dp(15));
+        }
+        alarmView.setCompoundDrawablesRelative(icon, null, null, null);
+        alarmView.setVisibility(View.VISIBLE);
+    }
+
+    // -------------------------------------------------- letter pop-out
+
+    @Override public void onScrubStart() {
+        hideKeyboard();
+        if (drawerOpen && search.length() > 0) search.setText("");
+    }
+
+    @Override public void onLetterSelected(String letter, float y) {
+        if (drawerOpen) {
+            Integer pos = adapter.positionForSection(letter);
+            if (pos != null) list.setSelectionFromTop(pos, 0);
+        } else {
+            showPanel(letter, y);
+        }
+    }
+
+    @Override public void onScrubMove(float x, float y, boolean inStrip) {
+        if (drawerOpen || !panelOpen) return;
+        setHighlight(inStrip ? null : panelRowAt(y));
+    }
+
+    @Override public void onScrubEnd(float x, float y, boolean inStrip) {
+        if (drawerOpen) return;
+        View row = highlightedRow;
+        if (row != null) {
+            setHighlight(null);
+            launch(((Row) row.getTag()).app, row);
+        } else if (!inStrip) {
+            hidePanel(true);
+        }
+        // Released on the strip: the pop-out stays open so its apps can be tapped.
+    }
+
+    private void showPanel(String letter, float letterY) {
+        boolean letterChanged = !letter.equals(panelLetter);
+        panelLetter = letter;
+        highlightedRow = null;
+        if (letterChanged || panelList.getChildCount() == 0) {
+            panelList.removeAllViews();
+            TextView header = new TextView(this);
+            header.setText(letter);
+            header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            header.setTypeface(Fonts.medium);
+            header.setPadding(dp(8), 0, 0, dp(6));
+            header.setTextColor(theme.accent);
+            panelList.addView(header, wrap());
+            for (AppInfo a : visibleApps) {
+                if (!a.section.equals(letter)) continue;
+                View row = createRow(STYLE_PANEL);
+                bindRow(row, a, STYLE_PANEL);
+                panelList.addView(row, wrap());
+            }
+        }
+
+        // Centre the list on the letter, kept inside the safe area.
+        int width = root.getWidth() - panelScroll.getPaddingLeft() - panelScroll.getPaddingRight();
+        panelList.measure(View.MeasureSpec.makeMeasureSpec(Math.max(width, 1), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int top = scroller.getPaddingTop();
+        int bottom = root.getHeight() - scroller.getPaddingBottom();
+        int maxH = Math.max(dp(120), bottom - top);
+        int h = Math.min(panelList.getMeasuredHeight(), maxH);
+        ViewGroup.LayoutParams lp = panelScroll.getLayoutParams();
+        if (lp.height != h) {
+            lp.height = h;
+            panelScroll.setLayoutParams(lp);
+        }
+        float ty = Math.max(top, Math.min(bottom - h, letterY - h / 2f));
+        panelScroll.setTranslationY(ty);
+        panelScroll.scrollTo(0, 0);
+
+        if (letterChanged) {
+            for (int i = 0; i < panelList.getChildCount(); i++) {
+                View c = panelList.getChildAt(i);
+                c.setAlpha(0f);
+                c.setTranslationX(dp(28));
+                c.animate().alpha(1f).translationX(0).setStartDelay(i * 14L).setDuration(180)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            }
+        }
+
+        if (!panelOpen) {
+            panelOpen = true;
+            panelLayer.animate().cancel();
+            panelLayer.setVisibility(View.VISIBLE);
+            panelLayer.setAlpha(0f);
+            panelLayer.animate().alpha(1f).setDuration(160).start();
+            home.animate().alpha(0.08f).setDuration(160).start();
+        }
+    }
+
+    private View panelRowAt(float y) {
+        int[] rootPos = new int[2];
+        root.getLocationOnScreen(rootPos);
+        float rawY = rootPos[1] + y;
+        int[] pos = new int[2];
+        for (int i = 0; i < panelList.getChildCount(); i++) {
+            View c = panelList.getChildAt(i);
+            if (!(c.getTag() instanceof Row)) continue;
+            c.getLocationOnScreen(pos);
+            if (rawY >= pos[1] && rawY < pos[1] + c.getHeight()) return c;
+        }
+        return null;
+    }
+
+    private void setHighlight(View row) {
+        if (row == highlightedRow) return;
+        if (highlightedRow != null) {
+            highlightedRow.animate().translationX(0).setDuration(120).start();
+            ((Row) highlightedRow.getTag()).label.setTextColor(theme.text);
+        }
+        highlightedRow = row;
+        if (row != null) {
+            row.animate().translationX(dp(12)).setDuration(120).start();
+            ((Row) row.getTag()).label.setTextColor(theme.accent);
+            row.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        }
+    }
+
+    private void hidePanel(boolean animate) {
+        if (!panelOpen) return;
+        panelOpen = false;
+        setHighlight(null);
+        panelLetter = null;
+        panelLayer.animate().cancel();
+        home.animate().cancel();
+        if (animate) {
+            panelLayer.animate().alpha(0f).setDuration(150).withEndAction(new Runnable() {
+                @Override public void run() {
+                    panelLayer.setVisibility(View.GONE);
+                    panelList.removeAllViews();
+                }
+            }).start();
+            home.animate().alpha(1f).setDuration(180).start();
+        } else {
+            panelLayer.setVisibility(View.GONE);
+            panelList.removeAllViews();
+            home.setAlpha(1f);
+        }
+    }
+
     // ---------------------------------------------------------- drawer
 
     private void openDrawer(boolean focusSearch) {
+        hidePanel(false);
         if (!drawerOpen) {
             drawerOpen = true;
             drawer.animate().cancel();
@@ -448,21 +1025,6 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         imm.hideSoftInputFromWindow(root.getWindowToken(), 0);
     }
 
-    @Override public void onScrubStart() {
-        if (search.length() > 0) search.setText("");
-        hideKeyboard();
-        search.clearFocus();
-        openDrawer(false);
-    }
-
-    @Override public void onLetterSelected(String letter) {
-        Integer pos = adapter.positionForSection(letter);
-        if (pos != null) list.setSelectionFromTop(pos, 0);
-    }
-
-    @Override public void onScrubEnd() {
-    }
-
     // --------------------------------------------------------- actions
 
     private void launch(AppInfo app, View source) {
@@ -472,9 +1034,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             Toast.makeText(this, "Can't open " + app.label, Toast.LENGTH_SHORT).show();
             return;
         }
-        if (drawerOpen) {
+        if (drawerOpen || panelOpen) {
             root.postDelayed(new Runnable() {
                 @Override public void run() {
+                    hidePanel(false);
                     closeDrawer(false);
                 }
             }, 350);
@@ -516,7 +1079,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                     return;
                 }
                 try {
-                    startActivityForResult(rm.createRequestRoleIntent(RoleManager.ROLE_HOME), 1);
+                    startActivityForResult(rm.createRequestRoleIntent(RoleManager.ROLE_HOME), REQUEST_HOME_ROLE);
                     return;
                 } catch (ActivityNotFoundException ignored) {
                 }
@@ -526,7 +1089,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     private void showAppMenu(final AppInfo app, View anchor) {
-        anchor.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        anchor.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         PopupMenu popup = new PopupMenu(this, anchor, Gravity.START);
         Menu menu = popup.getMenu();
         final List<ShortcutInfo> shortcuts = loadShortcuts(app);
@@ -537,8 +1100,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         final int favIndex = favorites.indexOf(app.key);
         if (favIndex >= 0) {
             menu.add(1, 1, 100, "Remove from home");
-            if (favIndex > 0) menu.add(1, 2, 101, "Move up");
-            if (favIndex < favorites.size() - 1) menu.add(1, 3, 102, "Move down");
+            menu.add(1, 2, 101, "Edit home screen");
         } else {
             menu.add(1, 4, 100, "Add to home");
         }
@@ -555,17 +1117,18 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 switch (id) {
                     case 1:
                         favorites.remove(app.key);
-                        break;
+                        saveFavorites();
+                        return true;
                     case 2:
-                        Collections.swap(favorites, favIndex, favIndex - 1);
-                        break;
-                    case 3:
-                        Collections.swap(favorites, favIndex, favIndex + 1);
-                        break;
+                        hidePanel(false);
+                        closeDrawer(false);
+                        setEditMode(true);
+                        return true;
                     case 4:
-                        favorites.add(app.key);
+                        if (!favorites.contains(app.key)) favorites.add(app.key);
+                        saveFavorites();
                         Toast.makeText(MainActivity.this, app.label + " added to home", Toast.LENGTH_SHORT).show();
-                        break;
+                        return true;
                     case 5:
                         try {
                             repo.showDetails(app);
@@ -578,8 +1141,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         prefs.setHidden(hidden);
                         favorites.remove(app.key);
                         prefs.setFavorites(favorites);
+                        hidePanel(false);
                         applyApps();
-                        Toast.makeText(MainActivity.this, app.label + " hidden. Unhide it from settings.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, app.label + " hidden. Unhide it in settings.", Toast.LENGTH_SHORT).show();
                         return true;
                     }
                     case 7: {
@@ -591,9 +1155,6 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                     default:
                         return false;
                 }
-                prefs.setFavorites(favorites);
-                renderFavorites();
-                return true;
             }
         });
         popup.show();
@@ -629,43 +1190,117 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         }
     }
 
+    private void showFavoritesPicker() {
+        final List<AppInfo> apps = new ArrayList<>(visibleApps);
+        String[] labels = new String[apps.size()];
+        final boolean[] checked = new boolean[apps.size()];
+        for (int i = 0; i < apps.size(); i++) {
+            labels[i] = apps.get(i).label;
+            checked[i] = favorites.contains(apps.get(i).key);
+        }
+        dialog()
+                .setTitle("Home apps")
+                .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
+                    @Override public void onClick(DialogInterface d, int which, boolean isChecked) {
+                        checked[which] = isChecked;
+                    }
+                })
+                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        Set<String> selected = new HashSet<>();
+                        for (int i = 0; i < apps.size(); i++) if (checked[i]) selected.add(apps.get(i).key);
+                        List<String> next = new ArrayList<>();
+                        for (String k : favorites) if (selected.contains(k)) next.add(k);
+                        for (AppInfo a : apps) if (selected.contains(a.key) && !next.contains(a.key)) next.add(a.key);
+                        favorites = next;
+                        saveFavorites();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     // -------------------------------------------------------- settings
+
+    private void showHomeMenu() {
+        String[] items = {
+                "Edit home screen",
+                "Add widget",
+                "Add world clock",
+                "Theme: " + Theme.NAMES[theme.id],
+                "Wallpaper",
+                "More settings",
+        };
+        dialog()
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        switch (which) {
+                            case 0: setEditMode(true); break;
+                            case 1: widgets.showPicker(); break;
+                            case 2: showZonePicker(); break;
+                            case 3: showThemePicker(); break;
+                            case 4:
+                                safeStart(Intent.createChooser(new Intent(Intent.ACTION_SET_WALLPAPER), "Choose wallpaper"));
+                                break;
+                            case 5: showSettings(); break;
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void showThemePicker() {
+        dialog()
+                .setTitle("Theme")
+                .setSingleChoiceItems(Theme.NAMES, theme.id, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        d.dismiss();
+                        if (which != theme.id) {
+                            prefs.setTheme(which);
+                            recreate();
+                        }
+                    }
+                })
+                .show();
+    }
 
     private void showSettings() {
         final boolean icons = prefs.showHomeIcons();
+        final boolean font = prefs.bundledFont();
+        final boolean alarm = prefs.showAlarm();
         final boolean dots = NotificationDotService.isEnabled(this);
         String[] items = {
-                "Change wallpaper",
-                icons ? "Hide icons on home screen" : "Show icons on home screen",
-                dots ? "Notification dots: on" : "Notification dots: off (tap to enable)",
+                "Icons on home: " + (icons ? "on" : "off"),
+                "Font: " + (font ? "Manrope" : "System"),
+                "Next alarm under date: " + (alarm ? "on" : "off"),
+                "Notification dots: " + (dots ? "on" : "off"),
                 "Hidden apps",
                 "Set as default launcher",
                 "About Cascade",
         };
-        new AlertDialog.Builder(this)
-                .setTitle("Cascade settings")
+        dialog()
+                .setTitle("Settings")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int which) {
                         switch (which) {
                             case 0:
-                                safeStart(Intent.createChooser(new Intent(Intent.ACTION_SET_WALLPAPER), "Choose wallpaper"));
-                                break;
-                            case 1:
                                 prefs.setShowHomeIcons(!icons);
                                 renderFavorites();
                                 break;
+                            case 1:
+                                prefs.setBundledFont(!font);
+                                recreate();
+                                break;
                             case 2:
-                                safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+                                prefs.setShowAlarm(!alarm);
+                                updateAlarm();
                                 break;
                             case 3:
-                                showHiddenApps();
+                                safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
                                 break;
-                            case 4:
-                                requestDefaultLauncher();
-                                break;
-                            case 5:
-                                showAbout();
-                                break;
+                            case 4: showHiddenApps(); break;
+                            case 5: requestDefaultLauncher(); break;
+                            case 6: showAbout(); break;
                         }
                     }
                 })
@@ -686,7 +1321,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             labels[i] = hiddenApps.get(i).label;
             checked[i] = true;
         }
-        new AlertDialog.Builder(this)
+        dialog()
                 .setTitle("Hidden apps (untick to unhide)")
                 .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
                     @Override public void onClick(DialogInterface d, int which, boolean isChecked) {
@@ -707,15 +1342,20 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     private void showAbout() {
-        new AlertDialog.Builder(this)
+        dialog()
                 .setTitle("Cascade Launcher")
                 .setMessage("A minimal, open-source launcher.\n\n"
-                        + "• Drag the letters on the right edge to browse apps\n"
-                        + "• Swipe up for search, swipe down for notifications\n"
+                        + "• Slide along the letters, then onto an app and let go to open it\n"
+                        + "• Swipe up to search, swipe down for notifications\n"
                         + "• Long-press an app for shortcuts and options\n"
-                        + "• Long-press empty space for settings")
+                        + "• Long-press empty space to edit home, add widgets, clocks or change theme\n\n"
+                        + "Font: Manrope (SIL Open Font License).")
                 .setPositiveButton("OK", null)
                 .show();
+    }
+
+    private AlertDialog.Builder dialog() {
+        return new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert);
     }
 
     // ------------------------------------------------------------ rows
@@ -730,6 +1370,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private final View.OnClickListener rowClick = new View.OnClickListener() {
         @Override public void onClick(View v) {
+            if (editMode) return;
             Row r = (Row) v.getTag();
             if (r.app != null) launch(r.app, v);
             else if (r.webQuery != null) webSearch(r.webQuery);
@@ -739,43 +1380,41 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private final View.OnLongClickListener rowLongClick = new View.OnLongClickListener() {
         @Override public boolean onLongClick(View v) {
             Row r = (Row) v.getTag();
-            if (r.app == null) return false;
+            if (r.app == null || editMode) return false;
             showAppMenu(r.app, v);
             return true;
         }
     };
 
-    private View createRow(boolean onHome) {
+    private View createRow(int style) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        int vp = dp(onHome ? 9 : 7);
-        row.setPadding(dp(8), vp, dp(12), vp);
-        GradientDrawable mask = new GradientDrawable();
-        mask.setColor(Color.WHITE);
-        mask.setCornerRadius(dp(16));
-        row.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, mask));
+        int vp = dp(style == STYLE_DRAWER ? 7 : style == STYLE_PANEL ? 8 : 9);
+        row.setPadding(dp(8), vp, dp(14), vp);
+        row.setBackground(ripple(dp(18)));
 
         Row r = new Row();
         r.icon = new ImageView(this);
-        int size = dp(onHome ? 34 : 40);
+        int size = dp(style == STYLE_DRAWER ? 36 : style == STYLE_PANEL ? 34 : 30);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(size, size);
-        ip.rightMargin = dp(16);
+        ip.rightMargin = dp(style == STYLE_DRAWER ? 16 : 18);
         row.addView(r.icon, ip);
 
         r.label = new TextView(this);
-        r.label.setTextColor(Color.WHITE);
-        r.label.setTextSize(TypedValue.COMPLEX_UNIT_SP, onHome ? 21 : 17);
+        r.label.setTextSize(TypedValue.COMPLEX_UNIT_SP, style == STYLE_DRAWER ? 18 : style == STYLE_PANEL ? 25 : 23);
+        r.label.setTypeface(style == STYLE_DRAWER ? Fonts.regular : Fonts.medium);
         r.label.setSingleLine(true);
         r.label.setEllipsize(TextUtils.TruncateAt.END);
-        if (onHome) styleOnWallpaper(r.label);
+        if (style == STYLE_HOME) styleText(r.label, theme.text);
+        else r.label.setTextColor(theme.text);
         row.addView(r.label, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         r.dot = new View(this);
         GradientDrawable dot = new GradientDrawable();
         dot.setShape(GradientDrawable.OVAL);
-        dot.setColor(ACCENT);
+        dot.setColor(theme.accent);
         r.dot.setBackground(dot);
         LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(7), dp(7));
         dotLp.leftMargin = dp(10);
@@ -787,14 +1426,16 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         return row;
     }
 
-    private void bindRow(View v, AppInfo app, boolean onHome) {
+    private void bindRow(View v, AppInfo app, int style) {
         Row r = (Row) v.getTag();
         r.app = app;
         r.webQuery = null;
         r.icon.setImageDrawable(app.icon);
         r.icon.setImageTintList(null);
-        r.icon.setVisibility(onHome && !prefs.showHomeIcons() ? View.GONE : View.VISIBLE);
+        r.icon.setColorFilter(theme.grayscale ? Theme.grayscaleFilter() : null);
+        r.icon.setVisibility(style == STYLE_HOME && !prefs.showHomeIcons() ? View.GONE : View.VISIBLE);
         r.label.setText(app.label);
+        r.label.setTextColor(theme.text);
         r.dot.setVisibility(NotificationDotService.hasDot(app.packageName()) ? View.VISIBLE : View.GONE);
     }
 
@@ -802,9 +1443,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         Row r = (Row) v.getTag();
         r.app = null;
         r.webQuery = query;
-        Drawable icon = getDrawable(android.R.drawable.ic_menu_search);
-        r.icon.setImageDrawable(icon);
-        r.icon.setImageTintList(ColorStateList.valueOf(Color.WHITE));
+        r.icon.setImageDrawable(getDrawable(android.R.drawable.ic_menu_search));
+        r.icon.setColorFilter(null);
+        r.icon.setImageTintList(ColorStateList.valueOf(theme.text));
         r.icon.setVisibility(View.VISIBLE);
         r.label.setText("Search the web for “" + query + "”");
         r.dot.setVisibility(View.GONE);
@@ -813,10 +1454,6 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     // --------------------------------------------------------- adapter
 
     private final class DrawerAdapter extends BaseAdapter {
-        private static final int TYPE_HEADER = 0;
-        private static final int TYPE_APP = 1;
-        private static final int TYPE_WEB = 2;
-
         private final List<Object> items = new ArrayList<>();
         private final Map<String, Integer> sectionPositions = new HashMap<>();
         private List<AppInfo> apps = new ArrayList<>();
@@ -879,9 +1516,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
         @Override public int getItemViewType(int position) {
             Object o = items.get(position);
-            if (o instanceof String) return TYPE_HEADER;
-            if (o instanceof WebSearch) return TYPE_WEB;
-            return TYPE_APP;
+            if (o instanceof String) return 0;
+            if (o instanceof WebSearch) return 2;
+            return 1;
         }
 
         @Override public View getView(int position, View convertView, ViewGroup parent) {
@@ -890,17 +1527,17 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 TextView header = (TextView) convertView;
                 if (header == null) {
                     header = new TextView(MainActivity.this);
-                    header.setTextColor(ACCENT);
+                    header.setTextColor(theme.accent);
                     header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                    header.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                    header.setTypeface(Fonts.medium);
                     header.setPadding(dp(14), dp(18), 0, dp(4));
                 }
                 header.setText((String) o);
                 return header;
             }
-            View row = convertView != null ? convertView : createRow(false);
+            View row = convertView != null ? convertView : createRow(STYLE_DRAWER);
             if (o instanceof WebSearch) bindWebRow(row, ((WebSearch) o).query);
-            else bindRow(row, (AppInfo) o, false);
+            else bindRow(row, (AppInfo) o, STYLE_DRAWER);
             return row;
         }
     }
@@ -927,9 +1564,30 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
     }
 
-    private void styleOnWallpaper(TextView tv) {
-        tv.setTextColor(Color.WHITE);
-        tv.setShadowLayer(dp(4), 0, dp(1), TEXT_SHADOW);
+    /** Text drawn straight on the wallpaper gets a soft shadow; on solid black it doesn't need one. */
+    private void styleText(TextView tv, int color) {
+        tv.setTextColor(color);
+        if (theme.solidBackground == 0) tv.setShadowLayer(dp(4), 0, dp(1), 0x99000000);
+    }
+
+    private GradientDrawable pill(int fill, int stroke) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(fill);
+        d.setCornerRadius(dp(26));
+        if (stroke != 0) d.setStroke(Math.max(1, dp(1)), stroke);
+        return d;
+    }
+
+    private RippleDrawable ripple(int radius) {
+        GradientDrawable mask = new GradientDrawable();
+        mask.setColor(Color.WHITE);
+        mask.setCornerRadius(radius);
+        return new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, mask);
+    }
+
+    private static int mix(int a, int b) {
+        int alpha = (Color.alpha(a) + Color.alpha(b)) / 2;
+        return Color.argb(alpha / 2, 0, 0, 0);
     }
 
     private static boolean hitsView(View v, MotionEvent e) {

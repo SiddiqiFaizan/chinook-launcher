@@ -20,7 +20,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/gen" "$OUT/classes"
 
 echo "==> Compiling resources"
-aapt package -f -m -J "$OUT/gen" -M AndroidManifest.xml -S res -I "$ANDROID_JAR" -F "$OUT/app.unaligned.apk"
+aapt package -f -m -J "$OUT/gen" -M AndroidManifest.xml -S res -A assets -0 ttf -I "$ANDROID_JAR" -F "$OUT/app.unaligned.apk"
 
 echo "==> Compiling Java"
 javac -source 8 -target 8 -encoding UTF-8 -Xlint:-options \

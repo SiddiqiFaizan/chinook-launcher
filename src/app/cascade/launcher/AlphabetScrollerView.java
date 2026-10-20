@@ -3,30 +3,33 @@ package app.cascade.launcher;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
 
 import java.util.List;
 
 /**
- * Vertical A–Z strip on the right edge. While dragging, letters near the finger
- * bulge outwards in a wave and the selected letter is reported to the listener.
+ * A–Z strip on the right edge. The view spans the full screen but only accepts touches that start
+ * on the strip; once a drag starts it follows the finger anywhere, so the finger can slide left
+ * onto the letter's app list. Letters near the finger bulge outward in a wave.
  */
 public final class AlphabetScrollerView extends View {
     interface Listener {
         void onScrubStart();
-        void onLetterSelected(String letter);
-        void onScrubEnd();
+        /** y is the centre of the selected letter, in this view's coordinates. */
+        void onLetterSelected(String letter, float y);
+        void onScrubMove(float x, float y, boolean inStrip);
+        void onScrubEnd(float x, float y, boolean inStrip);
     }
 
-    private static final float STRIP_DP = 36f;
+    private static final float STRIP_DP = 34f;
     private static final float MAX_STEP_DP = 26f;
-    private static final float WAVE_RADIUS_DP = 120f;
-    private static final float WAVE_SHIFT_DP = 56f;
+    private static final float WAVE_RADIUS_DP = 130f;
+    private static final float WAVE_SHIFT_DP = 44f;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final float density;
@@ -34,6 +37,7 @@ public final class AlphabetScrollerView extends View {
     private String[] letters = new String[0];
     private Listener listener;
     private int accentColor = 0xFF8AB4FF;
+    private int textColor = 0xFFFFFFFF;
 
     private boolean touching;
     private float touchY;
@@ -49,7 +53,6 @@ public final class AlphabetScrollerView extends View {
         density = getResources().getDisplayMetrics().density;
         scaledDensity = getResources().getDisplayMetrics().scaledDensity;
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         paint.setShadowLayer(3 * density, 0, density, 0x80000000);
     }
 
@@ -57,8 +60,14 @@ public final class AlphabetScrollerView extends View {
         this.listener = listener;
     }
 
-    void setAccentColor(int color) {
-        accentColor = color;
+    void setColors(int text, int accent) {
+        textColor = text;
+        accentColor = accent;
+        invalidate();
+    }
+
+    void setTypeface(Typeface typeface) {
+        paint.setTypeface(typeface);
         invalidate();
     }
 
@@ -68,9 +77,13 @@ public final class AlphabetScrollerView extends View {
         invalidate();
     }
 
+    private float stripLeft() {
+        return getWidth() - getPaddingRight() - STRIP_DP * density * 1.3f;
+    }
+
     /** True if a touch at this x (in this view's coordinates) belongs to the strip. */
     boolean isInStrip(float x) {
-        return letters.length > 0 && x >= getWidth() - getPaddingRight() - STRIP_DP * density * 1.25f;
+        return letters.length > 0 && x >= stripLeft();
     }
 
     private void computeGeometry() {
@@ -85,7 +98,7 @@ public final class AlphabetScrollerView extends View {
         if (letters.length == 0) return;
         computeGeometry();
         float baseX = getWidth() - getPaddingRight() - STRIP_DP * density / 2f;
-        float baseSize = Math.min(12 * scaledDensity, step * 0.85f);
+        float baseSize = Math.min(11.5f * scaledDensity, step * 0.8f);
         float radius = WAVE_RADIUS_DP * density;
         float shift = WAVE_SHIFT_DP * density;
         for (int i = 0; i < letters.length; i++) {
@@ -96,9 +109,9 @@ public final class AlphabetScrollerView extends View {
                 if (d < radius) w = (float) ((Math.cos(Math.PI * d / radius) + 1) / 2) * progress;
             }
             boolean isSelected = touching && i == selected;
-            paint.setTextSize(baseSize * (1 + 1.2f * w));
-            paint.setColor(isSelected ? accentColor : Color.WHITE);
-            paint.setAlpha(isSelected ? 255 : (int) (175 + 80 * w));
+            paint.setTextSize(baseSize * (1 + 0.9f * w));
+            paint.setColor(isSelected ? accentColor : textColor);
+            paint.setAlpha(isSelected ? 255 : (int) (150 + 105 * w));
             Paint.FontMetrics fm = paint.getFontMetrics();
             float baseline = y - (fm.ascent + fm.descent) / 2f;
             canvas.drawText(letters[i], baseX - shift * w, baseline, paint);
@@ -106,25 +119,28 @@ public final class AlphabetScrollerView extends View {
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
+        float x = e.getX(), y = e.getY();
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                if (!isInStrip(e.getX())) return false;
+                if (!isInStrip(x)) return false;
                 if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
                 touching = true;
                 selected = -1;
                 animateTo(1f);
                 if (listener != null) listener.onScrubStart();
-                track(e.getY());
+                track(x, y);
                 return true;
             case MotionEvent.ACTION_MOVE:
-                if (touching) track(e.getY());
+                if (touching) track(x, y);
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 if (touching) {
                     touching = false;
                     animateTo(0f);
-                    if (listener != null) listener.onScrubEnd();
+                    if (listener != null) {
+                        listener.onScrubEnd(x, y, e.getActionMasked() == MotionEvent.ACTION_UP && isInStrip(x));
+                    }
                 }
                 return true;
             default:
@@ -132,23 +148,30 @@ public final class AlphabetScrollerView extends View {
         }
     }
 
-    private void track(float y) {
-        touchY = y;
-        computeGeometry();
-        int idx = (int) Math.floor((y - (firstY - step / 2f)) / step);
-        idx = Math.max(0, Math.min(letters.length - 1, idx));
-        if (idx != selected) {
-            selected = idx;
-            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-            if (listener != null) listener.onLetterSelected(letters[idx]);
+    private void track(float x, float y) {
+        boolean inStrip = isInStrip(x);
+        if (inStrip) {
+            // Letters only change while on the strip; off it the letter is locked so the
+            // finger can travel to the app list.
+            touchY = y;
+            computeGeometry();
+            int idx = (int) Math.floor((y - (firstY - step / 2f)) / step);
+            idx = Math.max(0, Math.min(letters.length - 1, idx));
+            if (idx != selected) {
+                selected = idx;
+                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                if (listener != null) listener.onLetterSelected(letters[idx], firstY + idx * step);
+            }
+            invalidate();
         }
-        invalidate();
+        if (listener != null) listener.onScrubMove(x, y, inStrip);
     }
 
     private void animateTo(float target) {
         if (animator != null) animator.cancel();
         animator = ValueAnimator.ofFloat(progress, target);
-        animator.setDuration(170);
+        animator.setDuration(200);
+        animator.setInterpolator(new DecelerateInterpolator());
         animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override public void onAnimationUpdate(ValueAnimator a) {
                 progress = (Float) a.getAnimatedValue();

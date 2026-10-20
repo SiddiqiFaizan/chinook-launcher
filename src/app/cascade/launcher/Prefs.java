@@ -16,6 +16,11 @@ final class Prefs {
     private static final String HIDDEN = "hidden";
     private static final String HOME_ICONS = "home_icons";
     private static final String ASKED_DEFAULT = "asked_default";
+    private static final String THEME = "theme";
+    private static final String BUNDLED_FONT = "bundled_font";
+    private static final String WORLD_CLOCKS = "world_clocks";
+    private static final String WIDGETS = "widgets";
+    private static final String SHOW_ALARM = "show_alarm";
 
     private final SharedPreferences sp;
 
@@ -28,13 +33,11 @@ final class Prefs {
     }
 
     List<String> favorites() {
-        String s = sp.getString(FAVORITES, "");
-        if (s.isEmpty()) return new ArrayList<>();
-        return new ArrayList<>(Arrays.asList(s.split("\n")));
+        return getList(FAVORITES);
     }
 
     void setFavorites(List<String> keys) {
-        sp.edit().putString(FAVORITES, TextUtils.join("\n", keys)).apply();
+        putList(FAVORITES, keys);
     }
 
     Set<String> hidden() {
@@ -59,5 +62,57 @@ final class Prefs {
 
     void setAskedDefault() {
         sp.edit().putBoolean(ASKED_DEFAULT, true).apply();
+    }
+
+    int theme() {
+        return sp.getInt(THEME, Theme.COLORED);
+    }
+
+    void setTheme(int theme) {
+        sp.edit().putInt(THEME, theme).commit();
+    }
+
+    boolean bundledFont() {
+        return sp.getBoolean(BUNDLED_FONT, true);
+    }
+
+    void setBundledFont(boolean on) {
+        sp.edit().putBoolean(BUNDLED_FONT, on).commit();
+    }
+
+    boolean showAlarm() {
+        return sp.getBoolean(SHOW_ALARM, true);
+    }
+
+    void setShowAlarm(boolean on) {
+        sp.edit().putBoolean(SHOW_ALARM, on).apply();
+    }
+
+    /** Time zone ids, e.g. "Europe/London". */
+    List<String> worldClocks() {
+        return getList(WORLD_CLOCKS);
+    }
+
+    void setWorldClocks(List<String> zones) {
+        putList(WORLD_CLOCKS, zones);
+    }
+
+    /** Widgets as "appWidgetId:heightDp" entries, top to bottom. */
+    List<String> widgets() {
+        return getList(WIDGETS);
+    }
+
+    void setWidgets(List<String> entries) {
+        putList(WIDGETS, entries);
+    }
+
+    private List<String> getList(String key) {
+        String s = sp.getString(key, "");
+        if (s.isEmpty()) return new ArrayList<>();
+        return new ArrayList<>(Arrays.asList(s.split("\n")));
+    }
+
+    private void putList(String key, List<String> values) {
+        sp.edit().putString(key, TextUtils.join("\n", values)).apply();
     }
 }

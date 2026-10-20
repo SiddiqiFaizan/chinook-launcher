@@ -2,23 +2,27 @@
 
 A minimal, open-source Android home-screen launcher inspired by the *one-handed, list-based*
 style of launchers like Niagara. Written from scratch in plain Java with only Android framework
-APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is about 40 KB.
+APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is about 220 KB, most of it the bundled font.
 
 ## Features
 
-- **Home screen**: big clock and date at the top (tap for alarms or calendar), and your favourite
-  apps as a text list placed low on the screen for thumb reach.
-- **Alphabet wave scroller**: drag along the letters on the right edge. Letters bulge outwards
-  around your finger with haptic ticks, and the app list jumps to that letter.
-- **App drawer + search**: swipe up. Matches are ranked by prefix, then word prefix, then substring
-  (accent-insensitive). Press *Go* to launch the top hit, or search the web if nothing matches.
-- **Swipe down** on the home screen to pull down the notification shade.
-- **Long-press an app**: app shortcuts (when Cascade is your default launcher), add to or remove
-  from home, move up/down, hide, app info, uninstall.
-- **Long-press empty space**: settings (wallpaper, show/hide home icons, notification dots,
-  hidden apps, set as default launcher).
-- **Notification dots** (optional): grant notification access from settings.
-- **Work profile** support (badged icons), and live updates when apps are installed or removed.
+- **Home screen**: large clock, date and next alarm (tap them for alarms or calendar). Your
+  favourite apps sit low on the screen as a big text list, within thumb reach.
+- **Letter pop-out**: slide along the A–Z strip on the right. The letters ripple outward, and that
+  letter's apps fan out beside your finger. Slide left onto an app and let go to open it, or let go
+  on the strip to keep the list open and tap.
+- **World clocks**: add any cities. Each shows its local time, with +1/−1 when it's a different day.
+- **Widgets**: add any widget from the home screen. Long-press one to resize it (slider), move it
+  up or down, or remove it. Widgets scroll if there are more than fit.
+- **Edit mode**: long-press empty space → *Edit home screen*. Reorder (↑ ↓) or remove (✕) home
+  apps, and add apps, widgets and clocks from one bar.
+- **Themes**: *Colored* (wallpaper + blue accent), *Dark* (dimmed wallpaper, muted grey accent),
+  *Black & White* (pure black AMOLED background, grayscale icons and widgets).
+- **Search**: swipe up. Matches are ranked by prefix, then word prefix, then substring. Press *Go*
+  to launch the top hit, or search the web if nothing matches.
+- **Swipe down** for notifications. **Long-press an app** for app shortcuts, add/remove from home,
+  hide, app info and uninstall.
+- Optional notification dots, hidden apps, work-profile support, Manrope or system font.
 
 ## Install
 
@@ -46,8 +50,14 @@ signed with the same key.
 ```
 AndroidManifest.xml
 res/                         theme, colours, adaptive icon
+assets/fonts/                Manrope (SIL Open Font License)
 src/app/cascade/launcher/
-  MainActivity.java          home screen, drawer, gestures, menus, settings
+  MainActivity.java          home screen, letter pop-out, drawer, edit mode, menus, settings
+  WidgetController.java      widget host: pick, bind, configure, resize, reorder, remove
+  WidgetHostView.java        widget view that catches long-press
+  WorldClocks.java           time-zone list, names, day offsets
+  Theme.java                 Colored / Dark / Black & White palettes
+  Fonts.java                 bundled or system font
   AlphabetScrollerView.java  the A–Z wave strip
   AppRepository.java         loads apps for all profiles via LauncherApps, watches changes
   AppInfo.java               app model (label, icon, section letter, search key)
@@ -57,4 +67,4 @@ src/app/cascade/launcher/
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See `LICENSE`. The Manrope font is under the SIL Open Font License (`assets/fonts/OFL.txt`).
