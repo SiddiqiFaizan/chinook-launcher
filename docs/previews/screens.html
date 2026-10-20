@@ -196,10 +196,11 @@ function homeScreen(themeName, opts = {}) {
                 ['Photos'], ['Mail', 12, 'Weekly summary is ready']];
   favs.forEach(([name, count, preview]) => {
     const r = el('div', ''); r.className = 'row';
-    r.innerHTML = `${appIcon(name, 30, t)}<div style="margin-left:18px">
+    r.innerHTML = `<div style="position:relative">${appIcon(name, 30, t)}
+      ${count ? `<span class="badge" style="position:absolute;top:-5px;right:-7px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">${count}</span>` : ''}</div>
+      <div style="margin-left:18px">
       <div class="${sh}" style="font-size:23px;font-weight:600;color:${t.text}">${name}</div>
-      ${preview ? `<div class="${sh}" style="font-size:14px;color:${t.sec};margin-top:1px">${preview}</div>` : ''}</div>
-      ${count ? `<span class="badge" style="background:${t.badgeBg};color:${t.badgeFg}">${count}</span>` : ''}`;
+      ${preview ? `<div class="${sh}" style="font-size:14px;color:${t.sec};margin-top:1px">${preview}</div>` : ''}</div>`;
     home.appendChild(r);
   });
   home.appendChild(el('div', 'height:44px'));
@@ -211,8 +212,9 @@ function homeScreen(themeName, opts = {}) {
     const panel = el('div', `position:absolute;left:20px;right:76px;color:${t.text}`);
     panel.innerHTML = `<div style="color:${t.accent};font-size:15px;font-weight:600;padding:0 0 6px 8px">M</div>` +
       apps.map(a => `<div class="row" style="padding:8px 14px 8px 8px;${a === 'Messages' ? 'transform:translateX(12px)' : ''}">
-        ${appIcon(a, 34, t)}<div style="margin-left:18px;font-size:25px;font-weight:600;color:${a === 'Messages' ? t.accent : t.text}">${a}</div>
-        ${a === 'Messages' ? `<span class="badge" style="background:${t.badgeBg};color:${t.badgeFg}">3</span>` : ''}</div>`).join('');
+        <div style="position:relative">${appIcon(a, 34, t)}
+        ${a === 'Messages' ? `<span class="badge" style="position:absolute;top:-5px;right:-7px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">3</span>` : ''}</div>
+        <div style="margin-left:18px;font-size:25px;font-weight:600;color:${a === 'Messages' ? t.accent : t.text}">${a}</div></div>`).join('');
     phone.appendChild(panel);
     const h = 30 + apps.length * 54;
     panel.style.top = (ty - h / 2) + 'px';

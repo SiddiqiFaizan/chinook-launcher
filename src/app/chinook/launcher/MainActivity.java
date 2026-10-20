@@ -655,6 +655,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         Row r = (Row) row.getTag();
         r.texts.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         r.badge.setVisibility(View.GONE);
+        r.iconBadge.setVisibility(View.GONE);
         r.preview.setVisibility(View.GONE);
         if (index > 0) row.addView(m3.iconButton(R.drawable.ic_arrow_upward, theme.textSecondary, "Move up",
                 new View.OnClickListener() {
@@ -699,7 +700,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         for (int i = 0; i < panelList.getChildCount(); i++) {
             Object tag = panelList.getChildAt(i).getTag();
             if (tag instanceof Row && ((Row) tag).app != null) {
-                M3.setBadgeCount(((Row) tag).badge, NotificationDotService.count(((Row) tag).app.packageName()));
+                setRowBadge((Row) tag, NotificationDotService.count(((Row) tag).app.packageName()));
             }
         }
     }
@@ -1938,6 +1939,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private static final class Row {
         ImageView icon;
+        FrameLayout iconBox;
+        TextView iconBadge;
         LinearLayout texts;
         TextView label;
         TextView preview;
@@ -1993,7 +1996,19 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         int size = dp(iconSizeDp(style));
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(size, size);
         ip.rightMargin = dp(style == STYLE_DRAWER ? 16 : 18);
-        row.addView(r.icon, ip);
+        // Icon with the unread count on its top-right corner, like a standard app badge.
+        r.iconBox = new FrameLayout(this);
+        r.iconBox.setClipChildren(false);
+        row.setClipChildren(false);
+        r.iconBox.addView(r.icon, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+        r.iconBadge = m3.badge();
+        FrameLayout.LayoutParams ibp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP | Gravity.END);
+        ibp.topMargin = -dp(5);
+        ibp.rightMargin = -dp(7);
+        r.iconBox.addView(r.iconBadge, ibp);
+        r.iconBadge.setVisibility(View.GONE);
+        row.addView(r.iconBox, ip);
 
         r.texts = new LinearLayout(this);
         r.texts.setOrientation(LinearLayout.VERTICAL);
@@ -2039,10 +2054,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.icon.setImageDrawable(app.icon);
         r.icon.setImageTintList(null);
         r.icon.setColorFilter(theme.grayscale ? Theme.grayscaleFilter() : null);
-        r.icon.setVisibility(style == STYLE_HOME && !prefs.showHomeIcons() ? View.GONE : View.VISIBLE);
+        r.iconBox.setVisibility(style == STYLE_HOME && !prefs.showHomeIcons() ? View.GONE : View.VISIBLE);
         r.label.setText(app.label);
         r.label.setTextColor(theme.text);
-        M3.setBadgeCount(r.badge, NotificationDotService.count(app.packageName()));
+        setRowBadge(r, NotificationDotService.count(app.packageName()));
         // Home screen apps show the newest message under their name, like a quiet inbox.
         String preview = style == STYLE_HOME && prefs.messagePreviews() && !editMode
                 ? NotificationDotService.preview(app.packageName()) : null;
@@ -2067,6 +2082,15 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.preview.setText(count + (count == 1 ? " app \u00B7 tap to unhide" : " apps \u00B7 tap to unhide"));
         r.preview.setVisibility(View.VISIBLE);
         r.badge.setVisibility(View.GONE);
+        r.iconBadge.setVisibility(View.GONE);
+        r.iconBox.setVisibility(View.VISIBLE);
+    }
+
+    /** The count goes on the icon's corner; with home icons turned off it sits after the name. */
+    private void setRowBadge(Row r, int count) {
+        boolean onIcon = r.iconBox.getVisibility() == View.VISIBLE;
+        M3.setBadgeCount(onIcon ? r.iconBadge : r.badge, count);
+        (onIcon ? r.badge : r.iconBadge).setVisibility(View.GONE);
     }
 
     private void bindWebRow(View v, String query) {
@@ -2078,8 +2102,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.icon.setColorFilter(null);
         r.icon.setImageTintList(ColorStateList.valueOf(theme.text));
         r.icon.setVisibility(View.VISIBLE);
+        r.iconBox.setVisibility(View.VISIBLE);
         r.label.setText("Search the web for “" + query + "”");
         r.badge.setVisibility(View.GONE);
+        r.iconBadge.setVisibility(View.GONE);
         r.preview.setVisibility(View.GONE);
     }
 
