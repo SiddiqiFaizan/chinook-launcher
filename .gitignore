@@ -2,3 +2,7 @@ build/
 sdk/
 keystore/
 *.apk
+*.idsig
+docs/previews/out/
+docs/previews/icons.js
+node_modules/

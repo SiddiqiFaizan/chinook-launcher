@@ -1,0 +1,351 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chinook previews</title>
+<script src="icons.js"></script>
+<style>
+@font-face { font-family: Manrope; src: url("../../assets/fonts/Manrope.ttf"); font-weight: 200 800; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0b0c10; font-family: Manrope, sans-serif; -webkit-font-smoothing: antialiased; }
+.phone { width: 412px; height: 892px; position: relative; overflow: hidden; color: #fff; }
+.abs { position: absolute; }
+.status { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center;
+  justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600; z-index: 20; }
+.status .icons { display: flex; gap: 6px; align-items: center; }
+.navbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 108px; height: 4px;
+  border-radius: 2px; background: rgba(255,255,255,.75); z-index: 20; }
+.shadow { text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.row { display: flex; align-items: center; padding: 9px 14px 9px 8px; }
+.appicon { border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;
+  color: #fff; flex: none; }
+.badge { min-width: 16px; height: 16px; border-radius: 8px; padding: 0 4px; font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; margin-left: 10px; }
+.strip { position: absolute; right: 0; top: 0; bottom: 0; width: 140px; z-index: 10; }
+.strip span { position: absolute; transform: translate(-50%, -50%); font-weight: 600; white-space: nowrap; }
+.m3row { display: flex; align-items: center; padding: 8px 24px 8px 16px; min-height: 56px; }
+.m3row .t { font-size: 16px; letter-spacing: .03em; }
+.m3row .s { font-size: 14px; letter-spacing: .018em; margin-top: 2px; }
+.sub { font-size: 14px; font-weight: 600; padding: 20px 16px 8px; letter-spacing: .007em; }
+.hero { width: 1640px; height: 800px; position: relative; overflow: hidden;
+  background: radial-gradient(1200px 700px at 20% 10%, #1b2440 0%, #0b0c10 60%); }
+.frame { position: absolute; border-radius: 38px; overflow: hidden; box-shadow: 0 30px 60px rgba(0,0,0,.55),
+  0 0 0 8px #1d1e22, 0 0 0 9px #33353a; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ------------------------------------------------------------------ data
+const THEMES = {
+  colored: { accent: '#8AB4FF', text: '#FFFFFF', sec: 'rgba(255,255,255,.70)', panel: 'rgba(0,0,0,.70)',
+             card: 'rgba(0,0,0,.25)', badgeBg: '#A8C7FA', badgeFg: '#062E6F', gray: false, solid: null },
+  dark:    { accent: '#C4CAD6', text: '#F1F1F3', sec: 'rgba(255,255,255,.60)', panel: 'rgba(0,0,0,.90)',
+             card: '#1A1B1E', badgeBg: '#D0D4DC', badgeFg: '#20242B', gray: false, solid: null },
+  mono:    { accent: '#FFFFFF', text: '#FFFFFF', sec: 'rgba(255,255,255,.55)', panel: 'rgba(0,0,0,.97)',
+             card: '#101010', badgeBg: '#FFFFFF', badgeFg: '#000000', gray: true, solid: '#000000' },
+};
+// Neutral placeholder icons (no real app logos).
+const APPS = {
+  Phone: '#34A853', Messages: '#4285F4', Camera: '#5F6368', Browser: '#EA8600', Photos: '#E8453C',
+  Mail: '#C5221F', Maps: '#1E8E3E', Music: '#9334E6', Meet: '#00897B', Calendar: '#1A73E8',
+  Clock: '#3949AB', Notes: '#F9AB00', Weather: '#039BE5', Wallet: '#3C4043', Settings: '#5F6368',
+};
+const GRAY = c => { const n = parseInt(c.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const y = Math.round(.3 * r + .59 * g + .11 * b); return `rgb(${y},${y},${y})`; };
+
+function el(tag, style, html) { const e = document.createElement(tag); if (style) e.style.cssText = style;
+  if (html !== undefined) e.innerHTML = html; return e; }
+function icon(name, color, size = 24) {
+  const p = (ICONS[name] || []).map(d => `<path d="${d}" fill="${color}"/>`).join('');
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24">${p}</svg>`;
+}
+function appIcon(name, size, t) {
+  const c = APPS[name] || '#5F6368';
+  return `<div class="appicon" style="width:${size}px;height:${size}px;background:${t && t.gray ? GRAY(c) : c};
+    font-size:${size * .46}px">${name[0]}</div>`;
+}
+function statusBar(color = '#fff') {
+  const bar = el('div', `color:${color}`, `<span>9:41</span><span class="icons">
+    <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 11.5 0.5 3.2a10.6 10.6 0 0 1 15 0z" fill="${color}"/></svg>
+    <svg width="14" height="12" viewBox="0 0 14 12"><path d="M13 0v12H0z" fill="${color}"/></svg>
+    <svg width="22" height="12" viewBox="0 0 22 12"><rect x=".5" y=".5" width="18" height="11" rx="3" fill="none" stroke="${color}"/>
+    <rect x="2" y="2" width="13" height="8" rx="1.5" fill="${color}"/><rect x="19.5" y="4" width="2" height="4" rx="1" fill="${color}"/></svg>
+  </span>`);
+  bar.className = 'status';
+  return bar;
+}
+
+// ------------------------------------------------------------ wallpaper
+function wallpaper(canvas, style, w, h, note) {
+  const c = canvas.getContext('2d'), u = w / 400;
+  const glow = (x, y, r, col) => { const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, col); g.addColorStop(1, col.replace(/[\d.]+\)$/, '0)')); c.fillStyle = g;
+    c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); };
+  const vert = (stops) => { const g = c.createLinearGradient(0, 0, 0, h);
+    stops.forEach(([o, col]) => g.addColorStop(o, col)); c.fillStyle = g; c.fillRect(0, 0, w, h); };
+  const waves = (start, lines, col, stroke) => { c.strokeStyle = col; c.lineWidth = stroke;
+    const top = start * h, gap = (h - top) / (lines + 1);
+    for (let k = 0; k < lines; k++) { c.beginPath(); const base = top + gap * (k + 1), amp = (10 + k * 2.2) * u;
+      for (let x = 0; x <= w; x += 2) { const y = base + Math.sin(x * 2 * Math.PI / w * 1.3 + k * .55) * amp;
+        x ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); } };
+  const grain = (s) => { const img = c.getImageData(0, 0, w, h), d = img.data; let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < d.length; i += 4) { const a = rnd() * s, v = rnd() > .5 ? a : -a;
+      d[i] += v; d[i + 1] += v; d[i + 2] += v; } c.putImageData(img, 0, 0); };
+  switch (style) {
+    case 'aurora': c.fillStyle = '#0B1026'; c.fillRect(0, 0, w, h);
+      glow(.18 * w, .78 * h, .85 * w, 'rgba(61,107,255,.6)'); glow(.9 * w, .58 * h, .7 * w, 'rgba(155,92,255,.53)');
+      glow(.5 * w, 1.02 * h, .75 * w, 'rgba(46,197,206,.47)'); grain(5); break;
+    case 'dusk': vert([[0, '#140C2C'], [.45, '#4B1F5E'], [.78, '#B4466A'], [1, '#F29A62']]);
+      glow(.5 * w, .86 * h, .42 * w, 'rgba(255,214,165,.67)'); grain(4); break;
+    case 'graphite': vert([[0, '#1C1D21'], [1, '#0B0B0D']]); grain(8); break;
+    case 'midnight': c.fillStyle = '#05070D'; c.fillRect(0, 0, w, h); glow(.5 * w, 1.05 * h, .9 * w, 'rgba(34,51,85,.4)'); break;
+    case 'monowaves': c.fillStyle = '#000'; c.fillRect(0, 0, w, h); waves(.6, 14, 'rgba(255,255,255,.35)', 1.1 * u); break;
+    case 'horizon': c.fillStyle = '#000'; c.fillRect(0, 0, w, h); c.strokeStyle = 'rgba(255,255,255,.8)';
+      c.lineWidth = 1.4 * u; const r = 1.4 * w; c.beginPath(); c.arc(w / 2, .8 * h + r, r, 0, 7); c.stroke();
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(.72 * w, .7 * h, 7 * u, 0, 7); c.fill(); break;
+  }
+  if (note) { c.fillStyle = 'rgba(255,255,255,.7)'; c.font = `600 ${15 * u}px Manrope`; c.textAlign = 'center';
+    c.fillText(note, w / 2, .8 * h); }
+}
+function wallpaperLayer(phone, style, scrim) {
+  const cv = el('canvas', 'position:absolute;inset:0;width:412px;height:892px');
+  cv.width = 824; cv.height = 1784; wallpaper(cv, style, 824, 1784); phone.appendChild(cv);
+  if (scrim) phone.appendChild(el('div', `position:absolute;inset:0;background:${scrim}`));
+}
+
+// ---------------------------------------------------------------- strip
+function strip(phone, t, touchLetter) {
+  const letters = ['★', '#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+  const top = 32 + 36, bottom = 892 - 24 - 36, avail = bottom - top, n = letters.length;
+  const step = Math.min(avail / n, 26), first = top + (avail - step * n) / 2 + step / 2;
+  const s = el('div', ''); s.className = 'strip';
+  const baseX = 140 - 17, base = Math.min(11.5, step * .8);
+  const ti = touchLetter ? letters.indexOf(touchLetter) : -1, ty = first + ti * step;
+  letters.forEach((L, i) => {
+    const y = first + i * step; let w = 0;
+    if (ti >= 0) { const d = Math.abs(y - ty); if (d < 130) w = (Math.cos(Math.PI * d / 130) + 1) / 2; }
+    const sel = i === ti;
+    const sp = el('span', `left:${baseX - 44 * w}px;top:${y}px;font-size:${base * (1 + .9 * w)}px;
+      color:${sel ? t.accent : t.text};opacity:${sel ? 1 : (150 + 105 * w) / 255};
+      ${t.solid ? '' : 'text-shadow:0 1px 3px rgba(0,0,0,.5)'}`, L);
+    s.appendChild(sp);
+  });
+  phone.appendChild(s);
+  return ty;
+}
+
+// ----------------------------------------------------------------- home
+function homeScreen(themeName, opts = {}) {
+  const t = THEMES[themeName];
+  const phone = el('div'); phone.className = 'phone';
+  if (t.solid) phone.style.background = t.solid;
+  else wallpaperLayer(phone, opts.wallpaper || 'aurora',
+    themeName === 'dark' ? 'linear-gradient(rgba(0,0,0,.70), rgba(0,0,0,.85))'
+                         : 'linear-gradient(rgba(0,0,0,.28), rgba(0,0,0,0) 45%, rgba(0,0,0,.4))');
+  const sh = t.solid ? '' : 'shadow';
+  phone.appendChild(statusBar());
+  const home = el('div', `position:absolute;inset:0;padding:32px 54px 24px 20px;display:flex;flex-direction:column;
+    opacity:${opts.popout ? .08 : 1}`);
+  phone.appendChild(home);
+
+  // Top card slider (250dp) with the clock card or an app card.
+  const pager = el('div', 'height:250px;margin-top:20px;position:relative');
+  if (opts.appCard) {
+    const card = el('div', `position:absolute;inset:0;border-radius:28px;background:${t.card};padding:12px;
+      display:flex;align-items:center;`);
+    const tiles = [['Personal', '#7E57C2', 'P'], ['Work', '#00897B', 'W'], ['Studio', '#F4511E', 'S'], ['Wallet', null, null]];
+    tiles.forEach(([label, col, init]) => {
+      const cell = el('div', 'flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;position:relative');
+      const ic = col ? `<div class="appicon" style="width:60px;height:60px;background:${t.gray ? GRAY(col) : col};font-size:26px">${init}</div>`
+                     : appIcon('Wallet', 60, t);
+      cell.innerHTML = `<div style="position:relative">${ic}
+        ${label === 'Work' ? `<span class="badge" style="position:absolute;top:-2px;right:-8px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">4</span>` : ''}</div>
+        <div style="font-size:13px;font-weight:600;color:${t.text}">${label}</div>`;
+      card.appendChild(cell);
+    });
+    pager.appendChild(card);
+  } else {
+    const clock = el('div', `position:absolute;left:8px;top:58px;color:${t.text}`);
+    clock.className = sh;
+    clock.innerHTML = `<div style="font-size:68px;font-weight:300;line-height:1">9:41</div>
+      <div style="font-size:17px;font-weight:450;margin-top:6px">Tuesday, October 20</div>
+      <div style="font-size:14px;margin-top:6px;color:${t.sec};display:flex;align-items:center;gap:6px">
+        ${icon('alarm', t.sec, 15)} Wed 7:00 AM</div>`;
+    pager.appendChild(clock);
+  }
+  home.appendChild(pager);
+  const active = opts.appCard ? 1 : 0;
+  home.appendChild(el('div', 'height:18px;margin-top:8px;display:flex;justify-content:center;align-items:center;gap:6px',
+    [0, 1, 2].map(i => `<span style="width:${i === active ? 7 : 5}px;height:${i === active ? 7 : 5}px;border-radius:50%;
+      background:${t.text};opacity:${i === active ? .95 : .3}"></span>`).join('')));
+
+  // World clocks row.
+  const world = el('div', `display:flex;gap:18px;margin-top:14px;padding-left:8px`);
+  world.className = sh;
+  [['London', '2:41 PM', ''], ['Tokyo', '10:41 PM', ''], ['New York', '9:41 AM', '']].forEach(([c, tm]) => {
+    world.appendChild(el('div', '', `<div style="font-size:11px;font-weight:600;letter-spacing:.12em;color:${t.sec}">${c.toUpperCase()}</div>
+      <div style="font-size:21px;color:${t.text}">${tm}${c === 'Tokyo' ? `<sup style="font-size:11px;font-weight:600;color:${t.accent};margin-left:3px">+1</sup>` : ''}</div>`));
+  });
+  home.appendChild(world);
+  home.appendChild(el('div', 'flex:1'));
+
+  // Home apps, low on the screen.
+  const favs = [['Phone'], ['Messages', 3, 'Sarah: Running 10 min late'], ['Browser'], ['Camera'],
+                ['Photos'], ['Mail', 12, 'Weekly summary is ready']];
+  favs.forEach(([name, count, preview]) => {
+    const r = el('div', ''); r.className = 'row';
+    r.innerHTML = `${appIcon(name, 30, t)}<div style="margin-left:18px">
+      <div class="${sh}" style="font-size:23px;font-weight:600;color:${t.text}">${name}</div>
+      ${preview ? `<div class="${sh}" style="font-size:14px;color:${t.sec};margin-top:1px">${preview}</div>` : ''}</div>
+      ${count ? `<span class="badge" style="background:${t.badgeBg};color:${t.badgeFg}">${count}</span>` : ''}`;
+    home.appendChild(r);
+  });
+  home.appendChild(el('div', 'height:44px'));
+
+  if (opts.popout) {
+    phone.appendChild(el('div', `position:absolute;inset:0;background:${t.panel}`));
+    const ty = strip(phone, t, 'M');
+    const apps = ['Maps', 'Meet', 'Messages', 'Music'];
+    const panel = el('div', `position:absolute;left:20px;right:76px;color:${t.text}`);
+    panel.innerHTML = `<div style="color:${t.accent};font-size:15px;font-weight:600;padding:0 0 6px 8px">M</div>` +
+      apps.map(a => `<div class="row" style="padding:8px 14px 8px 8px;${a === 'Messages' ? 'transform:translateX(12px)' : ''}">
+        ${appIcon(a, 34, t)}<div style="margin-left:18px;font-size:25px;font-weight:600;color:${a === 'Messages' ? t.accent : t.text}">${a}</div>
+        ${a === 'Messages' ? `<span class="badge" style="background:${t.badgeBg};color:${t.badgeFg}">3</span>` : ''}</div>`).join('');
+    phone.appendChild(panel);
+    const h = 30 + apps.length * 54;
+    panel.style.top = (ty - h / 2) + 'px';
+    // Finger hint on the selected row.
+    phone.appendChild(el('div', `position:absolute;left:250px;top:${ty - h / 2 + 30 + 2 * 54 + 8}px;width:38px;height:38px;
+      border-radius:50%;background:rgba(255,255,255,.18);border:2px solid rgba(255,255,255,.35)`));
+  } else {
+    strip(phone, t, null);
+  }
+  phone.appendChild(el('div', '', '')).className = 'navbar';
+  return phone;
+}
+
+// ------------------------------------------------------------- settings
+const M3C = { surface: '#111318', onSurface: '#E2E2E9', onVar: '#C4C6D0', primary: '#A8C7FA', onPrimary: '#062E6F',
+  high: '#282A2F', highest: '#33353A', secCont: '#3E4759', onSecCont: '#DAE2F9' };
+function appBar(title, action) {
+  return `<div style="height:64px;display:flex;align-items:center;padding:0 12px 0 4px">
+    <div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center">${icon('arrow_back', M3C.onSurface)}</div>
+    <div style="flex:1;font-size:22px;margin-left:4px;color:${M3C.onSurface}">${title}</div>${action || ''}</div>`;
+}
+function m3row(ic, title, sub, trailing) {
+  return `<div class="m3row" style="min-height:${sub ? 72 : 56}px">
+    ${ic ? `<div style="margin-right:16px;display:flex">${icon(ic, M3C.onVar)}</div>` : ''}
+    <div style="flex:1"><div class="t" style="color:${M3C.onSurface}">${title}</div>
+    ${sub ? `<div class="s" style="color:${M3C.onVar}">${sub}</div>` : ''}</div>${trailing || ''}</div>`;
+}
+function m3switch(on) {
+  return `<div style="width:52px;height:32px;border-radius:16px;margin-left:16px;position:relative;flex:none;
+    background:${on ? M3C.primary : M3C.highest};${on ? '' : 'border:2px solid #8E9099'}">
+    <div style="position:absolute;top:${on ? 4 : 6}px;${on ? 'right:4px' : 'left:6px'};width:${on ? 24 : 16}px;height:${on ? 24 : 16}px;
+    border-radius:50%;background:${on ? M3C.onPrimary : '#8E9099'}"></div></div>`;
+}
+function settingsScreen() {
+  const phone = el('div', `background:${M3C.surface}`); phone.className = 'phone';
+  phone.appendChild(statusBar(M3C.onSurface));
+  const body = el('div', 'position:absolute;top:32px;left:0;right:0;bottom:0');
+  body.innerHTML = appBar('Settings') +
+    `<div class="sub" style="color:${M3C.primary}">Appearance</div>` +
+    m3row('palette', 'Theme', 'Colored') + m3row('text_fields', 'Text size', 'Default · 23 sp') +
+    m3row('apps', 'Icon size', 'Default · 30 dp') + m3row('schedule', 'Clock size', 'Default · 68 sp') +
+    m3row('apps', 'Icons on home screen', 'Show app icons next to names', m3switch(true)) +
+    `<div class="sub" style="color:${M3C.primary}">Home screen</div>` +
+    m3row('edit', 'Edit home screen', 'Reorder, add or remove home apps') +
+    m3row('view_carousel', 'Add top card', 'Widget, app shortcuts or clock') +
+    m3row('public', 'World clocks', 'London, Tokyo, New York') +
+    m3row('alarm', 'Next alarm', 'Show your next alarm under the date', m3switch(true));
+  phone.appendChild(body);
+  phone.appendChild(el('div')).className = 'navbar';
+  return phone;
+}
+function checkbox(on) {
+  return on ? `<svg width="18" height="18" viewBox="0 0 18 18" style="margin-left:16px;flex:none"><rect width="18" height="18" rx="2" fill="${M3C.primary}"/>
+    <path d="M4 9.2l3.2 3.2L14 5.6" stroke="${M3C.onPrimary}" stroke-width="2.2" fill="none"/></svg>`
+    : `<svg width="18" height="18" viewBox="0 0 18 18" style="margin-left:16px;flex:none"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="${M3C.onVar}" stroke-width="2"/></svg>`;
+}
+function pickerScreen() {
+  const phone = el('div', `background:${M3C.surface}`); phone.className = 'phone';
+  phone.appendChild(statusBar(M3C.onSurface));
+  const save = `<div style="height:40px;padding:0 24px;border-radius:20px;background:${M3C.primary};color:${M3C.onPrimary};
+    display:flex;align-items:center;font-size:14px;font-weight:600">Save (3)</div>`;
+  const row = (name, sub, on, avatar) => `<div class="m3row" style="min-height:${sub ? 72 : 56}px;padding-right:12px">
+    <div style="margin-right:16px">${avatar ? `<div class="appicon" style="width:40px;height:40px;background:${avatar[1]};font-size:18px">${avatar[0]}</div>` : appIcon(name, 40)}</div>
+    <div style="flex:1"><div class="t" style="color:${M3C.onSurface}">${name}</div>${sub ? `<div class="s" style="color:${M3C.onVar}">${sub}</div>` : ''}</div>${checkbox(on)}</div>`;
+  const body = el('div', 'position:absolute;top:32px;left:0;right:0;bottom:0');
+  body.innerHTML = appBar('Apps &amp; shortcuts', save) +
+    `<div style="margin:4px 16px 8px;height:56px;border-radius:28px;background:${M3C.high};display:flex;align-items:center;padding:0 16px">
+      ${icon('search', M3C.onVar)}<span style="margin-left:16px;font-size:16px;color:${M3C.onVar}">Search apps or shortcuts</span></div>
+     <div style="padding:0 32px 4px;font-size:14px;color:${M3C.onVar}">Choose up to 8</div>
+     <div class="sub" style="color:${M3C.primary}">Selected</div>` +
+    row('personal@example.com', 'Shortcut · Mail', true, ['P', '#7E57C2']) +
+    row('work@example.com', 'Shortcut · Mail', true, ['W', '#00897B']) +
+    row('Wallet', null, true) +
+    `<div class="sub" style="color:${M3C.primary}">Apps, then shortcuts</div>` +
+    row('Calendar', null, false) + row('Maps', null, false) + row('Music', null, false) + row('Notes', null, false);
+  phone.appendChild(body);
+  phone.appendChild(el('div')).className = 'navbar';
+  return phone;
+}
+
+// ---------------------------------------------------------- lock screens
+function lockScreen(style, label) {
+  const phone = el('div'); phone.className = 'phone';
+  const cv = el('canvas', 'position:absolute;inset:0;width:412px;height:892px'); cv.width = 824; cv.height = 1784;
+  wallpaper(cv, style, 824, 1784, style === 'horizon' ? 'If found, call 555 0100' : '');
+  phone.appendChild(cv);
+  phone.appendChild(statusBar());
+  phone.appendChild(el('div', 'position:absolute;top:120px;left:0;right:0;text-align:center;color:#fff',
+    `<div style="font-size:15px;font-weight:500;opacity:.9">Tue, Oct 20</div>
+     <div style="font-size:96px;font-weight:300;line-height:1.05">9:41</div>`));
+  phone.appendChild(el('div', 'position:absolute;bottom:36px;left:0;right:0;text-align:center;font-size:13px;opacity:.7', label));
+  return phone;
+}
+
+// ----------------------------------------------------------------- hero
+function frame(node, x, y, scale) {
+  const f = el('div', `left:${x}px;top:${y}px;width:412px;height:892px;transform:scale(${scale});transform-origin:0 0`);
+  f.className = 'frame'; f.appendChild(node); return f;
+}
+function hero() {
+  const h = el('div'); h.className = 'hero';
+  h.appendChild(el('div', 'position:absolute;left:80px;top:270px;color:#fff;width:500px',
+    `<div style="font-size:64px;font-weight:700;letter-spacing:-.02em">Chinook</div>
+     <div style="font-size:24px;font-weight:400;opacity:.8;margin-top:12px;line-height:1.4">A simple, open-source Android launcher for a minimalist home screen.</div>
+     <div style="font-size:16px;opacity:.55;margin-top:24px">Colored · Dark · Black &amp; White</div>`));
+  h.appendChild(frame(homeScreen('dark'), 650, 90, .7));
+  h.appendChild(frame(homeScreen('colored'), 975, 43, .8));
+  h.appendChild(frame(homeScreen('mono'), 1340, 90, .7));
+  return h;
+}
+
+// --------------------------------------------------------------- router
+const screen = new URLSearchParams(location.search).get('s');
+const root = document.getElementById('root');
+document.fonts.load('600 20px Manrope').then(() => {
+  const map = {
+    hero: hero,
+    home: () => homeScreen('colored'),
+    popout: () => homeScreen('colored', { popout: true }),
+    cards: () => homeScreen('colored', { appCard: true }),
+    dark: () => homeScreen('dark'),
+    mono: () => homeScreen('mono'),
+    settings: settingsScreen,
+    picker: pickerScreen,
+    lock_aurora: () => lockScreen('aurora', 'Aurora · Colored'),
+    lock_dusk: () => lockScreen('dusk', 'Dusk · Colored'),
+    lock_graphite: () => lockScreen('graphite', 'Graphite · Dark'),
+    lock_horizon: () => lockScreen('horizon', 'Horizon · Black & White'),
+    lock_monowaves: () => lockScreen('monowaves', 'Mono waves · Black & White'),
+  };
+  root.appendChild(map[screen]());
+  document.body.dataset.ready = '1';
+});
+</script>
+</body>
+</html>
