@@ -231,6 +231,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     @Override protected void onResume() {
         super.onResume();
         if (awaitingNotificationAccess) onReturnFromNotificationSettings();
+        else ensureListenerConnected();
         refreshDots();
         // Values like notification access or default launcher may have changed in system settings.
         if (settingsPage != null) buildSettings();
@@ -1450,6 +1451,30 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         intro.setPadding(dp(24), 0, dp(24), dp(8));
         sheet.add(intro);
 
+        // Live status, so it's clear which step is left.
+        boolean granted = NotificationDotService.isEnabled(this);
+        LinearLayout status = new LinearLayout(this);
+        status.setOrientation(LinearLayout.HORIZONTAL);
+        status.setGravity(Gravity.CENTER_VERTICAL);
+        status.setBackground(m3.shape(granted ? m3.primaryContainer : m3.surfaceContainerHighest, 16));
+        status.setPadding(dp(16), dp(12), dp(16), dp(12));
+        android.widget.ImageView statusIcon = m3.iconView(granted ? R.drawable.ic_check : R.drawable.ic_info,
+                granted ? m3.onPrimaryContainer : m3.onSurfaceVariant, 20);
+        ((LinearLayout.LayoutParams) statusIcon.getLayoutParams()).rightMargin = dp(12);
+        status.addView(statusIcon);
+        status.addView(m3.text(granted
+                        ? "Notification access is on. Badges appear as new notifications arrive."
+                        : "Notification access is still off. Allowing restricted settings only unlocks the "
+                                + "switch \u2014 you still need to turn Chinook on in step " + (Build.VERSION.SDK_INT >= 33 ? 2 : 1) + ".",
+                M3.BODY_MEDIUM, granted ? m3.onPrimaryContainer : m3.onSurface),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.leftMargin = slp.rightMargin = dp(16);
+        slp.bottomMargin = dp(8);
+        status.setLayoutParams(slp);
+        sheet.add(status);
+
         int step = 1;
         if (Build.VERSION.SDK_INT >= 33) {
             sheet.add(m3.listItem(R.drawable.ic_lock, null, step++ + ". Allow restricted settings",
@@ -1481,7 +1506,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
         TextView note = m3.text("This is a special access, so App info \u2192 Permissions will still say "
                 + "\u201CNo permissions requested\u201D. That's normal. Check it in Settings \u2192 Apps \u2192 "
-                + "Special app access \u2192 Notification access.", M3.BODY_MEDIUM, m3.onSurfaceVariant);
+                + "Special app access \u2192 Notification access.\n\nThe \u201CAllow notifications\u201D switch under App "
+                + "info \u2192 Notifications is different: it lets Chinook post its own notifications, which it never "
+                + "does, so it can stay off.", M3.BODY_MEDIUM, m3.onSurfaceVariant);
         note.setPadding(dp(24), dp(12), dp(24), dp(4));
         sheet.add(note);
 
@@ -1506,15 +1533,20 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
     }
 
+    /** Asks the system to (re)connect the listener if access is granted but it isn't running. */
+    private void ensureListenerConnected() {
+        if (!NotificationDotService.isEnabled(this) || NotificationDotService.isConnected()) return;
+        try {
+            android.service.notification.NotificationListenerService.requestRebind(
+                    new ComponentName(this, NotificationDotService.class));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     private void onReturnFromNotificationSettings() {
         awaitingNotificationAccess = false;
         if (NotificationDotService.isEnabled(this)) {
-            // Make sure the listener connects now rather than at the next reboot.
-            try {
-                android.service.notification.NotificationListenerService.requestRebind(
-                        new ComponentName(this, NotificationDotService.class));
-            } catch (RuntimeException ignored) {
-            }
+            ensureListenerConnected();
             Toast.makeText(this, "Notification badges are on", Toast.LENGTH_SHORT).show();
             if (settingsPage != null) buildSettings();
         } else {
@@ -1658,7 +1690,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 }));
         final boolean badgesOn = NotificationDotService.isEnabled(this);
         c.addView(m3.listItem(R.drawable.ic_notifications, null, "Notification badges",
-                badgesOn ? "On \u00B7 counts show on every app" : "Off \u00B7 tap to set up", null,
+                badgesOn ? (NotificationDotService.isConnected() ? "On \u00B7 counts show on every app"
+                        : "Access granted \u00B7 connecting") : "Off \u00B7 tap to set up", null,
                 run(new Runnable() {
                     @Override public void run() {
                         if (badgesOn) openNotificationAccessSettings();

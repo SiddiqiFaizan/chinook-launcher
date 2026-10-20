@@ -57,21 +57,44 @@ public class NotificationDotService extends NotificationListenerService {
         listener = l;
     }
 
+    /** True while the system has the listener bound and is sending it notifications. */
+    private static volatile boolean connected;
+
+    static boolean isConnected() {
+        return connected;
+    }
+
+    /** Whether notification access is granted, using the official check (Android 8.1+). */
     static boolean isEnabled(Context context) {
+        ComponentName me = new ComponentName(context, NotificationDotService.class);
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            android.app.NotificationManager nm =
+                    (android.app.NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                try {
+                    return nm.isNotificationListenerAccessGranted(me);
+                } catch (RuntimeException ignored) {
+                    // Fall back to the setting below.
+                }
+            }
+        }
         String flat = Settings.Secure.getString(context.getContentResolver(), "enabled_notification_listeners");
         if (flat == null) return false;
-        String me = new ComponentName(context, NotificationDotService.class).flattenToString();
         for (String s : flat.split(":")) {
-            if (me.equals(s)) return true;
+            if (me.flattenToString().equals(s)) return true;
         }
         return false;
     }
 
-    @Override public void onListenerConnected() { refresh(); }
+    @Override public void onListenerConnected() {
+        connected = true;
+        refresh();
+    }
     @Override public void onNotificationPosted(StatusBarNotification sbn) { refresh(); }
     @Override public void onNotificationRemoved(StatusBarNotification sbn) { refresh(); }
 
     @Override public void onListenerDisconnected() {
+        connected = false;
         synchronized (NotificationDotService.class) {
             active.clear();
         }
