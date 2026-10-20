@@ -375,7 +375,7 @@ final class TopCards {
             badge.setTag(cell.app.packageName());
             M3.setBadgeCount(badge, NotificationDotService.count(cell.app.packageName()));
             iconBox.addView(badge, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP | Gravity.END));
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(M3.BADGE_DP), Gravity.TOP | Gravity.END));
             badges.add(badge);
         }
         v.addView(iconBox, new LinearLayout.LayoutParams(dp(iconDp + 10), dp(iconDp + 6)));

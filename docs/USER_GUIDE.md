@@ -45,7 +45,8 @@ From top to bottom:
 2. **World clocks.** Any cities you've added, with their local time. A small **+1** or **−1** means
    it's already tomorrow, or still yesterday, there. Tap the row to manage cities.
 3. **Home apps.** Your favourites as a list of names, low on the screen so your thumb reaches them.
-   Unread counts appear as small badges, and the newest message shows under the app's name.
+   Unread counts appear as small badges on the icon's corner, and the newest message shows under
+   the app's name.
 4. **Alphabet strip.** ★, #, then A–Z down the right edge.
 
 <br clear="right">
@@ -147,14 +148,17 @@ Change the theme with long-press → *Theme*, or in Settings → Appearance.
 
 **Sizes** (Settings → Appearance). Each option shows a preview and its exact size:
 
-| Setting | Small | Default | Large | Extra large |
-|---|---|---|---|---|
-| Text size | 19 sp | 23 sp | 27 sp | 31 sp |
-| Icon size | 24 dp | 30 dp | 38 dp | 46 dp |
-| Clock size | 52 sp | 68 sp | 84 sp | 100 sp |
+| Setting | Extra small | Small | Default | Large | Extra large |
+|---|---|---|---|---|---|
+| Home text size | 16 sp | 19 sp | 23 sp | 27 sp | 31 sp |
+| Home icon size | 20 dp | 24 dp | 30 dp | 38 dp | 46 dp |
+| Clock size | – | 52 sp | 68 sp | 84 sp | 100 sp |
+| App list text size | 14 sp | 16 sp | 18 sp | 20 sp | 22 sp |
+| App list icon size | 24 dp | 30 dp | 36 dp | 42 dp | 48 dp |
 
-The app list and the letter pop-out scale with your choice. You can also turn icons off on the
-home screen for a text-only look.
+The letter pop-out follows the home sizes; the app list has its own. Long app names wrap onto a
+second line instead of being cut off. You can also turn icons off on the home screen for a
+text-only look.
 
 **Font:** Manrope (default) or your phone's own font.
 
@@ -191,7 +195,7 @@ Long-press empty space → **Settings**.
 | Section | Setting | Notes |
 |---|---|---|
 | Appearance | Theme | Colored, Dark, Black & White |
-| | Text size, Icon size, Clock size | With previews and exact sizes |
+| | Home text & icon size, Clock size, App list text & icon size | With previews and exact sizes |
 | | Icons on home screen | Text-only when off |
 | | Font | Manrope or system |
 | Home screen | Edit home screen | Reorder, add, remove home apps |

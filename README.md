@@ -35,7 +35,7 @@ no ads, no tracking, no account, and no internet permission. The whole app is un
 
 ### Home screen
 - **Home apps as a list.** Big, readable names placed low on the screen, within thumb reach.
-  Optional icons, with adjustable text, icon and clock sizes.
+  Optional icons, with adjustable text, icon and clock sizes for the home screen and the app list.
 - **Top card slider.** Swipe the top of the screen between cards: the **clock** (time, date, next
   alarm), any **widget** (weather, calendar, wallet, music…), and **app cards** holding up to 8
   apps or app shortcuts, such as one tile per Gmail account showing its profile picture. With three

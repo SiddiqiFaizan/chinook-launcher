@@ -331,18 +331,28 @@ final class M3 {
         return v;
     }
 
-    /** Material large badge: a pill with the notification count ("99+" beyond 99). */
+    /** Badge height in dp. */
+    static final int BADGE_DP = 14;
+
+    /**
+     * Unread-count badge: a small pill in a high-contrast colour with a thin dark ring, so it stands
+     * out on any icon or wallpaper. Red with white text (Colored), light grey (Dark), white (B&W).
+     */
     TextView badge() {
+        int fill = theme.id == Theme.COLORED ? 0xFFD93025 : theme.id == Theme.DARK ? 0xFFECECEC : 0xFFFFFFFF;
+        int textColor = theme.id == Theme.COLORED ? Color.WHITE : Color.BLACK;
         TextView b = new TextView(context);
-        b.setTextColor(onPrimary);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        b.setTypeface(Fonts.medium);
+        b.setTextColor(textColor);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        b.setTypeface(Typeface.create(Fonts.medium, Typeface.BOLD));
         b.setIncludeFontPadding(false);
         b.setGravity(Gravity.CENTER);
-        b.setMinWidth(dp(16));
-        b.setMinimumWidth(dp(16));
-        b.setPadding(dp(4), 0, dp(4), 0);
-        b.setBackground(shape(primary, 8));
+        b.setMinWidth(dp(BADGE_DP));
+        b.setMinimumWidth(dp(BADGE_DP));
+        b.setPadding(dp(3), 0, dp(3), 0);
+        GradientDrawable bg = shape(fill, BADGE_DP / 2f);
+        bg.setStroke(Math.max(1, Math.round(1.5f * density)), 0xFF101010);
+        b.setBackground(bg);
         return b;
     }
 

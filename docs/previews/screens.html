@@ -19,7 +19,8 @@ body { background: #0b0c10; font-family: Manrope, sans-serif; -webkit-font-smoot
 .row { display: flex; align-items: center; padding: 9px 14px 9px 8px; }
 .appicon { border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;
   color: #fff; flex: none; }
-.badge { min-width: 16px; height: 16px; border-radius: 8px; padding: 0 4px; font-size: 11px; font-weight: 600;
+.badge { min-width: 14px; height: 14px; border-radius: 7px; padding: 0 3px; font-size: 10px; font-weight: 800;
+  border: 1.5px solid #101010; box-sizing: content-box;
   display: inline-flex; align-items: center; justify-content: center; margin-left: 10px; }
 .strip { position: absolute; right: 0; top: 0; bottom: 0; width: 140px; z-index: 10; }
 .strip span { position: absolute; transform: translate(-50%, -50%); font-weight: 600; white-space: nowrap; }
@@ -39,9 +40,9 @@ body { background: #0b0c10; font-family: Manrope, sans-serif; -webkit-font-smoot
 // ------------------------------------------------------------------ data
 const THEMES = {
   colored: { accent: '#8AB4FF', text: '#FFFFFF', sec: 'rgba(255,255,255,.70)', panel: 'rgba(0,0,0,.70)',
-             card: 'rgba(0,0,0,.25)', badgeBg: '#A8C7FA', badgeFg: '#062E6F', gray: false, solid: null },
+             card: 'rgba(0,0,0,.25)', badgeBg: '#D93025', badgeFg: '#FFFFFF', gray: false, solid: null },
   dark:    { accent: '#C4CAD6', text: '#F1F1F3', sec: 'rgba(255,255,255,.60)', panel: 'rgba(0,0,0,.90)',
-             card: '#1A1B1E', badgeBg: '#D0D4DC', badgeFg: '#20242B', gray: false, solid: null },
+             card: '#1A1B1E', badgeBg: '#ECECEC', badgeFg: '#000000', gray: false, solid: null },
   mono:    { accent: '#FFFFFF', text: '#FFFFFF', sec: 'rgba(255,255,255,.55)', panel: 'rgba(0,0,0,.97)',
              card: '#101010', badgeBg: '#FFFFFF', badgeFg: '#000000', gray: true, solid: '#000000' },
 };
@@ -197,7 +198,7 @@ function homeScreen(themeName, opts = {}) {
   favs.forEach(([name, count, preview]) => {
     const r = el('div', ''); r.className = 'row';
     r.innerHTML = `<div style="position:relative">${appIcon(name, 30, t)}
-      ${count ? `<span class="badge" style="position:absolute;top:-5px;right:-7px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">${count}</span>` : ''}</div>
+      ${count ? `<span class="badge" style="position:absolute;top:-3px;right:-4px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">${count}</span>` : ''}</div>
       <div style="margin-left:18px">
       <div class="${sh}" style="font-size:23px;font-weight:600;color:${t.text}">${name}</div>
       ${preview ? `<div class="${sh}" style="font-size:14px;color:${t.sec};margin-top:1px">${preview}</div>` : ''}</div>`;
@@ -213,7 +214,7 @@ function homeScreen(themeName, opts = {}) {
     panel.innerHTML = `<div style="color:${t.accent};font-size:15px;font-weight:600;padding:0 0 6px 8px">M</div>` +
       apps.map(a => `<div class="row" style="padding:8px 14px 8px 8px;${a === 'Messages' ? 'transform:translateX(12px)' : ''}">
         <div style="position:relative">${appIcon(a, 34, t)}
-        ${a === 'Messages' ? `<span class="badge" style="position:absolute;top:-5px;right:-7px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">3</span>` : ''}</div>
+        ${a === 'Messages' ? `<span class="badge" style="position:absolute;top:-3px;right:-4px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">3</span>` : ''}</div>
         <div style="margin-left:18px;font-size:25px;font-weight:600;color:${a === 'Messages' ? t.accent : t.text}">${a}</div></div>`).join('');
     phone.appendChild(panel);
     const h = 30 + apps.length * 54;
@@ -254,8 +255,9 @@ function settingsScreen() {
   const body = el('div', 'position:absolute;top:32px;left:0;right:0;bottom:0');
   body.innerHTML = appBar('Settings') +
     `<div class="sub" style="color:${M3C.primary}">Appearance</div>` +
-    m3row('palette', 'Theme', 'Colored') + m3row('text_fields', 'Text size', 'Default · 23 sp') +
-    m3row('apps', 'Icon size', 'Default · 30 dp') + m3row('schedule', 'Clock size', 'Default · 68 sp') +
+    m3row('palette', 'Theme', 'Colored') + m3row('text_fields', 'Home text size', 'Default · 23 sp') +
+    m3row('apps', 'Home icon size', 'Default · 30 dp') + m3row('schedule', 'Clock size', 'Default · 68 sp') +
+    m3row('text_fields', 'App list text size', 'Default · 18 sp') + m3row('apps', 'App list icon size', 'Default · 36 dp') +
     m3row('apps', 'Icons on home screen', 'Show app icons next to names', m3switch(true)) +
     `<div class="sub" style="color:${M3C.primary}">Home screen</div>` +
     m3row('edit', 'Edit home screen', 'Reorder, add or remove home apps') +

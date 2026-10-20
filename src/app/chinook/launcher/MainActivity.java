@@ -1370,29 +1370,66 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private static final int SIZE_LABEL = 0;
     private static final int SIZE_ICON = 1;
     private static final int SIZE_CLOCK = 2;
-    private static final String[] SIZE_NAMES = {"Small", "Default", "Large", "Extra large"};
-    private static final int[] LABEL_SIZES = {19, 23, 27, 31};
-    private static final int[] ICON_SIZES = {24, 30, 38, 46};
-    private static final int[] CLOCK_SIZES = {52, 68, 84, 100};
+    private static final int SIZE_LIST_LABEL = 3;
+    private static final int SIZE_LIST_ICON = 4;
+    private static final String[] NAMES_5 = {"Extra small", "Small", "Default", "Large", "Extra large"};
+    private static final String[] NAMES_4 = {"Small", "Default", "Large", "Extra large"};
+    private static final int[][] SIZES = {
+            {16, 19, 23, 27, 31},   // home text (sp)
+            {20, 24, 30, 38, 46},   // home icons (dp)
+            {52, 68, 84, 100},      // clock (sp)
+            {14, 16, 18, 20, 22},   // app list text (sp)
+            {24, 30, 36, 42, 48},   // app list icons (dp)
+    };
+    private static final String[] SIZE_TITLES = {
+            "Home text size", "Home icon size", "Clock size", "App list text size", "App list icon size"};
 
-    private static String sizeName(int[] sizes, int value) {
-        for (int i = 0; i < sizes.length; i++) if (sizes[i] == value) return SIZE_NAMES[i];
-        return "Custom";
+    private static String[] sizeNames(int which) {
+        return SIZES[which].length == 5 ? NAMES_5 : NAMES_4;
+    }
+
+    private static int defaultSizeIndex(int which) {
+        return SIZES[which].length == 5 ? 2 : 1;
+    }
+
+    private static boolean isIconSize(int which) {
+        return which == SIZE_ICON || which == SIZE_LIST_ICON;
+    }
+
+    private int currentSize(int which) {
+        switch (which) {
+            case SIZE_LABEL: return prefs.labelSizeSp();
+            case SIZE_ICON: return prefs.iconSizeDp();
+            case SIZE_CLOCK: return prefs.clockSizeSp();
+            case SIZE_LIST_LABEL: return prefs.listLabelSizeSp();
+            default: return prefs.listIconSizeDp();
+        }
+    }
+
+    /** e.g. "Default \u00B7 23 sp" */
+    private String sizeSummary(int which) {
+        int value = currentSize(which);
+        String name = "Custom";
+        for (int i = 0; i < SIZES[which].length; i++) if (SIZES[which][i] == value) name = sizeNames(which)[i];
+        return name + " \u00B7 " + value + (isIconSize(which) ? " dp" : " sp");
     }
 
     /** Size chooser: every option shows a live preview and its exact size. */
     private void showSizePicker(final int which) {
-        final int[] sizes = which == SIZE_LABEL ? LABEL_SIZES : which == SIZE_ICON ? ICON_SIZES : CLOCK_SIZES;
-        final int current = which == SIZE_LABEL ? prefs.labelSizeSp()
-                : which == SIZE_ICON ? prefs.iconSizeDp() : prefs.clockSizeSp();
-        String title = which == SIZE_LABEL ? "Text size" : which == SIZE_ICON ? "Icon size" : "Clock size";
-        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, title);
+        final int[] sizes = SIZES[which];
+        final int current = currentSize(which);
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, SIZE_TITLES[which]);
         AppInfo sample = favoriteApps().isEmpty() ? (visibleApps.isEmpty() ? null : visibleApps.get(0))
                 : favoriteApps().get(0);
+        if (which == SIZE_LIST_LABEL) {
+            // Preview the longest app name, since that's the one most likely to wrap.
+            for (AppInfo a : visibleApps) if (sample == null || a.label.length() > sample.label.length()) sample = a;
+        }
         for (int i = 0; i < sizes.length; i++) {
             final int size = sizes[i];
-            String unit = which == SIZE_ICON ? " dp" : " sp";
-            LinearLayout row = m3.listItem(0, null, SIZE_NAMES[i], size + unit + (i == 1 ? " \u00B7 default" : ""),
+            String unit = isIconSize(which) ? " dp" : " sp";
+            LinearLayout row = m3.listItem(0, null, sizeNames(which)[i],
+                    size + unit + (i == defaultSizeIndex(which) ? " \u00B7 default" : ""),
                     m3.radio(size == current), new View.OnClickListener() {
                         @Override public void onClick(View v) {
                             sheet.dismissThen(new Runnable() {
@@ -1403,7 +1440,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         }
                     });
             View preview;
-            if (which == SIZE_ICON) {
+            if (isIconSize(which)) {
                 ImageView icon = new ImageView(this);
                 icon.setImageDrawable(sample != null ? sample.icon : getDrawable(R.mipmap.ic_launcher));
                 if (theme.grayscale) icon.setColorFilter(Theme.grayscaleFilter());
@@ -1411,14 +1448,14 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 preview = icon;
             } else {
                 TextView t = new TextView(this);
-                t.setText(which == SIZE_LABEL ? (sample != null ? sample.label : "Messages") : "9:41");
+                t.setText(which == SIZE_CLOCK ? "9:41" : (sample != null ? sample.label : "Messages"));
                 t.setTextColor(m3.onSurface);
-                t.setTypeface(which == SIZE_LABEL ? Fonts.medium : Fonts.light);
+                t.setTypeface(which == SIZE_CLOCK ? Fonts.light : which == SIZE_LIST_LABEL ? Fonts.regular : Fonts.medium);
                 // The clock is shown at half scale so every option fits on screen.
                 t.setTextSize(TypedValue.COMPLEX_UNIT_SP, which == SIZE_CLOCK ? size / 2f : size);
-                t.setSingleLine(true);
+                t.setMaxLines(2);
                 t.setEllipsize(TextUtils.TruncateAt.END);
-                t.setLayoutParams(new LinearLayout.LayoutParams(dp(which == SIZE_LABEL ? 150 : 110),
+                t.setLayoutParams(new LinearLayout.LayoutParams(dp(which == SIZE_CLOCK ? 110 : 160),
                         ViewGroup.LayoutParams.WRAP_CONTENT));
                 preview = t;
             }
@@ -1431,9 +1468,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     private void applySize(int which, int size) {
-        if (which == SIZE_LABEL) prefs.setLabelSizeSp(size);
-        else if (which == SIZE_ICON) prefs.setIconSizeDp(size);
-        else prefs.setClockSizeSp(size);
+        switch (which) {
+            case SIZE_LABEL: prefs.setLabelSizeSp(size); break;
+            case SIZE_ICON: prefs.setIconSizeDp(size); break;
+            case SIZE_CLOCK: prefs.setClockSizeSp(size); break;
+            case SIZE_LIST_LABEL: prefs.setListLabelSizeSp(size); break;
+            default: prefs.setListIconSizeDp(size); break;
+        }
         clockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, prefs.clockSizeSp());
         renderFavorites();
         // Drop recycled rows so the drawer picks up the new sizes.
@@ -1675,27 +1716,16 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         showFontPicker();
                     }
                 })));
-        c.addView(m3.listItem(R.drawable.ic_text_fields, null, "Text size",
-                sizeName(LABEL_SIZES, prefs.labelSizeSp()) + " \u00B7 " + prefs.labelSizeSp() + " sp", null,
-                run(new Runnable() {
-                    @Override public void run() {
-                        showSizePicker(SIZE_LABEL);
-                    }
-                })));
-        c.addView(m3.listItem(R.drawable.ic_apps, null, "Icon size",
-                sizeName(ICON_SIZES, prefs.iconSizeDp()) + " \u00B7 " + prefs.iconSizeDp() + " dp", null,
-                run(new Runnable() {
-                    @Override public void run() {
-                        showSizePicker(SIZE_ICON);
-                    }
-                })));
-        c.addView(m3.listItem(R.drawable.ic_schedule, null, "Clock size",
-                sizeName(CLOCK_SIZES, prefs.clockSizeSp()) + " \u00B7 " + prefs.clockSizeSp() + " sp", null,
-                run(new Runnable() {
-                    @Override public void run() {
-                        showSizePicker(SIZE_CLOCK);
-                    }
-                })));
+        int[] sizeIcons = {R.drawable.ic_text_fields, R.drawable.ic_apps, R.drawable.ic_schedule,
+                R.drawable.ic_text_fields, R.drawable.ic_apps};
+        for (int i = 0; i < SIZE_TITLES.length; i++) {
+            final int which = i;
+            c.addView(m3.listItem(sizeIcons[i], null, SIZE_TITLES[i], sizeSummary(i), null, run(new Runnable() {
+                @Override public void run() {
+                    showSizePicker(which);
+                }
+            })));
+        }
         c.addView(switchItem(R.drawable.ic_apps, "Icons on home screen", "Show app icons next to names",
                 prefs.showHomeIcons(), new Toggle() {
                     @Override public void set(boolean on) {
@@ -1972,14 +2002,14 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private float labelSizeSp(int style) {
         int home = prefs.labelSizeSp();
         if (style == STYLE_PANEL) return home + 2;
-        if (style == STYLE_DRAWER) return Math.max(15, Math.round(home * 0.78f));
+        if (style == STYLE_DRAWER) return prefs.listLabelSizeSp();
         return home;
     }
 
     private int iconSizeDp(int style) {
         int home = prefs.iconSizeDp();
         if (style == STYLE_PANEL) return home + 4;
-        if (style == STYLE_DRAWER) return home + 6;
+        if (style == STYLE_DRAWER) return prefs.listIconSizeDp();
         return home;
     }
 
@@ -2003,9 +2033,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.iconBox.addView(r.icon, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
         r.iconBadge = m3.badge();
         FrameLayout.LayoutParams ibp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP | Gravity.END);
-        ibp.topMargin = -dp(5);
-        ibp.rightMargin = -dp(7);
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(M3.BADGE_DP), Gravity.TOP | Gravity.END);
+        ibp.topMargin = -dp(2);
+        ibp.rightMargin = -dp(3);
         r.iconBox.addView(r.iconBadge, ibp);
         r.iconBadge.setVisibility(View.GONE);
         row.addView(r.iconBox, ip);
@@ -2015,8 +2045,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.label = new TextView(this);
         r.label.setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSizeSp(style));
         r.label.setTypeface(style == STYLE_DRAWER ? Fonts.regular : Fonts.medium);
-        r.label.setSingleLine(true);
+        // Names wrap onto a second line rather than being cut off with "...".
+        r.label.setSingleLine(false);
+        r.label.setMaxLines(2);
         r.label.setEllipsize(TextUtils.TruncateAt.END);
+        r.label.setLineSpacing(0f, 0.95f);
         if (style == STYLE_HOME) styleText(r.label, theme.text);
         else r.label.setTextColor(theme.text);
         r.texts.addView(r.label);
@@ -2030,11 +2063,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         else r.preview.setTextColor(theme.textSecondary);
         r.preview.setVisibility(View.GONE);
         r.texts.addView(r.preview);
-        row.addView(r.texts, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // In the app list and pop-out the name gets the full row width; on home it hugs the text.
+        row.addView(r.texts, style == STYLE_HOME
+                ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                : new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         r.badge = m3.badge();
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(16));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(M3.BADGE_DP));
         bp.leftMargin = dp(10);
         bp.gravity = Gravity.CENTER_VERTICAL;
         row.addView(r.badge, bp);

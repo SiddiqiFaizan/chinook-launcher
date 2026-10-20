@@ -27,6 +27,8 @@ final class Prefs {
     private static final String LABEL_SIZE = "label_size_sp";
     private static final String ICON_SIZE = "icon_size_dp";
     private static final String CLOCK_SIZE = "clock_size_sp";
+    private static final String LIST_LABEL_SIZE = "list_label_size_sp";
+    private static final String LIST_ICON_SIZE = "list_icon_size_dp";
     private static final String PREVIEWS = "message_previews";
     private static final String ASKED_DOTS = "asked_dots";
     private static final String PINNED_GROUPS = "pinned_shortcut_groups";
@@ -143,6 +145,24 @@ final class Prefs {
 
     void setIconSizeDp(int dp) {
         sp.edit().putInt(ICON_SIZE, dp).apply();
+    }
+
+    /** App list (drawer) name size in sp. */
+    int listLabelSizeSp() {
+        return sp.getInt(LIST_LABEL_SIZE, 18);
+    }
+
+    void setListLabelSizeSp(int value) {
+        sp.edit().putInt(LIST_LABEL_SIZE, value).apply();
+    }
+
+    /** App list (drawer) icon size in dp. */
+    int listIconSizeDp() {
+        return sp.getInt(LIST_ICON_SIZE, 36);
+    }
+
+    void setListIconSizeDp(int value) {
+        sp.edit().putInt(LIST_ICON_SIZE, value).apply();
     }
 
     int clockSizeSp() {
