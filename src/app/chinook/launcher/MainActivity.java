@@ -1128,6 +1128,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             CharSequence label = shortcuts.get(i).getShortLabel();
             menu.add(0, 1000 + i, i, label == null ? "Shortcut" : label);
         }
+        if (!shortcuts.isEmpty()) menu.add(0, 9, 50, "Add shortcuts to a top card");
         final int favIndex = favorites.indexOf(app.key);
         if (favIndex >= 0) {
             menu.add(1, 1, 100, "Remove from home");
@@ -1167,6 +1168,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         } catch (RuntimeException ignored) {
                         }
                         return true;
+                    case 9:
+                        hidePanel(false);
+                        closeDrawer(false);
+                        topCards.addShortcutsFrom(app, loadShortcuts(app, 0));
+                        return true;
                     case 6:
                         hidePanel(false);
                         setAppHidden(app, !isHidden);
@@ -1189,6 +1195,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     private List<ShortcutInfo> loadShortcuts(AppInfo app) {
+        return loadShortcuts(app, MAX_SHORTCUTS);
+    }
+
+    private List<ShortcutInfo> loadShortcuts(AppInfo app, int limit) {
         List<ShortcutInfo> result = new ArrayList<>();
         LauncherApps la = repo.launcherApps();
         try {
@@ -1203,7 +1213,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             for (ShortcutInfo s : found) {
                 if (!s.isEnabled()) continue;
                 result.add(s);
-                if (result.size() >= MAX_SHORTCUTS) break;
+                if (limit > 0 && result.size() >= limit) break;
             }
         } catch (RuntimeException ignored) {
         }

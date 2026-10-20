@@ -3,6 +3,13 @@ package app.chinook.launcher;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.content.pm.LauncherApps;
+import android.content.pm.ShortcutInfo;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.net.Uri;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
@@ -42,6 +49,7 @@ final class TopCards {
     static final String CLOCK = "clock";
     private static final String WIDGET = "widget:";
     private static final String APPS = "apps:";
+    private static final String SHORTCUT = "s:";
     private static final int MAX_APPS = 8;
     private static final int MIN_HEIGHT_DP = 140;
     private static final int MAX_HEIGHT_DP = 520;
@@ -56,6 +64,8 @@ final class TopCards {
     private final LinearLayout dots;
     private final float density;
     private final List<String> cards;
+    private final LauncherApps launcherApps;
+    private final UserManager userManager;
     /** Badges on app-card icons, refreshed in place when notifications change. */
     private final List<TextView> badges = new ArrayList<>();
 
@@ -70,6 +80,8 @@ final class TopCards {
         this.pager = pager;
         this.dots = dots;
         this.density = activity.getResources().getDisplayMetrics().density;
+        this.launcherApps = (LauncherApps) activity.getSystemService(android.content.Context.LAUNCHER_APPS_SERVICE);
+        this.userManager = (UserManager) activity.getSystemService(android.content.Context.USER_SERVICE);
 
         if (prefs.hasCards()) {
             cards = prefs.cards();
@@ -254,11 +266,41 @@ final class TopCards {
         return card;
     }
 
+    // ------------------------------------------------------- app cards
+
+    /** One tile on an app card: an app, or another app's shortcut (e.g. a Gmail account). */
+    private static final class Cell {
+        String key;
+        String label;
+        Drawable icon;
+        AppInfo app;
+        ShortcutInfo shortcut;
+    }
+
+    private Cell resolveCell(String key) {
+        Cell c = new Cell();
+        c.key = key;
+        if (key.startsWith(SHORTCUT)) {
+            ShortcutInfo si = findShortcut(key);
+            if (si == null) return null;
+            c.shortcut = si;
+            c.label = shortcutLabel(si);
+            c.icon = shortcutIcon(si);
+        } else {
+            AppInfo a = host.findApp(key);
+            if (a == null) return null;
+            c.app = a;
+            c.label = a.label;
+            c.icon = a.icon;
+        }
+        return c;
+    }
+
     private View appsCard(int index, List<String> keys) {
-        List<AppInfo> apps = new ArrayList<>();
+        List<Cell> cells = new ArrayList<>();
         for (String k : keys) {
-            AppInfo a = host.findApp(k);
-            if (a != null) apps.add(a);
+            Cell c = resolveCell(k);
+            if (c != null) cells.add(c);
         }
         FrameLayout card = roundedCard();
         if (keys.isEmpty()) {
@@ -268,10 +310,19 @@ final class TopCards {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             return card;
         }
-        if (apps.isEmpty()) return card;
+        if (cells.isEmpty()) {
+            if (host.visibleApps().isEmpty()) return card; // apps still loading
+            TextView t = m.text(launcherApps.hasShortcutHostPermission() ? "Long-press to choose apps"
+                    : "Make Chinook your home app to show shortcuts", M3.BODY_MEDIUM, theme.textSecondary);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(dp(16), 0, dp(16), 0);
+            card.addView(t, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            return card;
+        }
 
         // Pick a grid that suits the count, then size icons to the space each cell gets.
-        int n = apps.size();
+        int n = cells.size();
         int columns = n <= 4 ? n : n <= 6 ? 3 : 4;
         int rows = (n + columns - 1) / columns;
         int pad = 12;
@@ -296,7 +347,7 @@ final class TopCards {
             for (int c = 0; c < columns; c++) {
                 int i = row * columns + c;
                 if (i >= n) break;
-                line.addView(appCell(index, apps.get(i), iconDp, showLabels),
+                line.addView(cellView(index, cells.get(i), iconDp, showLabels),
                         new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
             }
             grid.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -306,30 +357,31 @@ final class TopCards {
         return card;
     }
 
-    private View appCell(final int cardIndex, final AppInfo app, int iconDp, boolean showLabel) {
-        LinearLayout cell = new LinearLayout(activity);
-        cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER);
-        cell.setPadding(dp(4), dp(4), dp(4), dp(4));
-        cell.setBackground(m.ripple(theme.text, null, 20));
+    private View cellView(final int cardIndex, final Cell cell, int iconDp, boolean showLabel) {
+        LinearLayout v = new LinearLayout(activity);
+        v.setOrientation(LinearLayout.VERTICAL);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(4), dp(4), dp(4), dp(4));
+        v.setBackground(m.ripple(theme.text, null, 20));
 
-        // Icon with a notification badge on its top-right corner.
+        // Icon, with a notification badge on apps (shortcuts don't have their own counts).
         FrameLayout iconBox = new FrameLayout(activity);
         ImageView icon = new ImageView(activity);
-        icon.setImageDrawable(app.icon);
+        icon.setImageDrawable(cell.icon);
         if (theme.grayscale) icon.setColorFilter(Theme.grayscaleFilter());
         iconBox.addView(icon, new FrameLayout.LayoutParams(dp(iconDp), dp(iconDp), Gravity.CENTER));
-        TextView badge = m.badge();
-        badge.setTag(app.packageName());
-        M3.setBadgeCount(badge, NotificationDotService.count(app.packageName()));
-        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP | Gravity.END);
-        iconBox.addView(badge, blp);
-        badges.add(badge);
-        cell.addView(iconBox, new LinearLayout.LayoutParams(dp(iconDp + 10), dp(iconDp + 6)));
+        if (cell.app != null) {
+            TextView badge = m.badge();
+            badge.setTag(cell.app.packageName());
+            M3.setBadgeCount(badge, NotificationDotService.count(cell.app.packageName()));
+            iconBox.addView(badge, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP | Gravity.END));
+            badges.add(badge);
+        }
+        v.addView(iconBox, new LinearLayout.LayoutParams(dp(iconDp + 10), dp(iconDp + 6)));
 
         if (showLabel) {
-            TextView label = m.text(app.label, M3.LABEL_MEDIUM, theme.text);
+            TextView label = m.text(cell.label, M3.LABEL_MEDIUM, theme.text);
             label.setTextSize(TypedValue.COMPLEX_UNIT_SP, iconDp >= 56 ? 13 : 12);
             label.setSingleLine(true);
             label.setEllipsize(TextUtils.TruncateAt.END);
@@ -337,21 +389,22 @@ final class TopCards {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.topMargin = dp(6);
-            cell.addView(label, lp);
+            v.addView(label, lp);
         }
-        cell.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                host.launch(app, v);
+        v.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (cell.app != null) host.launch(cell.app, view);
+                else startShortcut(cell.shortcut, view);
             }
         });
-        // The apps fill the whole card, so their long-press menu also carries the card's options.
-        cell.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) {
-                showCardMenu(cardIndex, v, app);
+        // The tiles fill the whole card, so their long-press menu also carries the card's options.
+        v.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View view) {
+                showCardMenu(cardIndex, view, cell);
                 return true;
             }
         });
-        return cell;
+        return v;
     }
 
     /** Refreshes app-card badges after notifications change, without rebuilding the cards. */
@@ -359,18 +412,202 @@ final class TopCards {
         for (TextView b : badges) M3.setBadgeCount(b, NotificationDotService.count((String) b.getTag()));
     }
 
+    // ------------------------------------------------------- shortcuts
+
+    /** "s:<userSerial>:<package>:<encoded shortcut id>" */
+    private String shortcutKey(ShortcutInfo si) {
+        return SHORTCUT + userManager.getSerialNumberForUser(si.getUserHandle()) + ":" + si.getPackage()
+                + ":" + Uri.encode(si.getId());
+    }
+
+    private ShortcutInfo findShortcut(String key) {
+        String[] parts = key.substring(SHORTCUT.length()).split(":", 3);
+        if (parts.length < 3) return null;
+        try {
+            UserHandle user = userManager.getUserForSerialNumber(Long.parseLong(parts[0]));
+            if (user == null || !launcherApps.hasShortcutHostPermission()) return null;
+            LauncherApps.ShortcutQuery q = new LauncherApps.ShortcutQuery();
+            q.setPackage(parts[1]);
+            q.setShortcutIds(Collections.singletonList(Uri.decode(parts[2])));
+            q.setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC
+                    | LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST
+                    | LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED);
+            List<ShortcutInfo> found = launcherApps.getShortcuts(q, user);
+            return found == null || found.isEmpty() ? null : found.get(0);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Every shortcut apps currently offer, across profiles (needs Chinook to be the home app). */
+    private List<ShortcutInfo> allShortcuts() {
+        List<ShortcutInfo> out = new ArrayList<>();
+        try {
+            if (!launcherApps.hasShortcutHostPermission()) return out;
+            Set<String> seen = new HashSet<>();
+            for (UserHandle user : userManager.getUserProfiles()) {
+                LauncherApps.ShortcutQuery q = new LauncherApps.ShortcutQuery();
+                q.setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC
+                        | LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST);
+                List<ShortcutInfo> found = launcherApps.getShortcuts(q, user);
+                if (found == null) continue;
+                for (ShortcutInfo si : found) {
+                    if (si.isEnabled() && seen.add(shortcutKey(si))) out.add(si);
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return out;
+    }
+
+    private String shortcutLabel(ShortcutInfo si) {
+        CharSequence l = si.getShortLabel();
+        if (TextUtils.isEmpty(l)) l = si.getLongLabel();
+        return l == null ? appLabel(si.getPackage()) : l.toString();
+    }
+
+    private Drawable shortcutIcon(ShortcutInfo si) {
+        try {
+            Drawable d = launcherApps.getShortcutIconDrawable(si, activity.getResources().getDisplayMetrics().densityDpi);
+            if (d != null) return d;
+        } catch (RuntimeException ignored) {
+        }
+        for (AppInfo a : host.visibleApps()) if (a.packageName().equals(si.getPackage())) return a.icon;
+        return null;
+    }
+
+    private String appLabel(String pkg) {
+        for (AppInfo a : host.visibleApps()) if (a.packageName().equals(pkg)) return a.label;
+        return pkg;
+    }
+
+    private void startShortcut(ShortcutInfo si, View source) {
+        try {
+            int[] pos = new int[2];
+            source.getLocationOnScreen(pos);
+            Rect bounds = new Rect(pos[0], pos[1], pos[0] + source.getWidth(), pos[1] + source.getHeight());
+            launcherApps.startShortcut(si.getPackage(), si.getId(), bounds, null, si.getUserHandle());
+        } catch (RuntimeException e) {
+            Toast.makeText(activity, "This shortcut isn't available any more", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Pins every shortcut placed on a card, so it keeps working even if the app stops offering it
+     * (dynamic shortcuts like Gmail accounts can change). Unpins packages no longer used.
+     */
+    private void syncPins() {
+        try {
+            if (!launcherApps.hasShortcutHostPermission()) return;
+            java.util.Map<String, List<String>> byPackage = new java.util.HashMap<>();
+            for (String card : cards) {
+                if (!card.startsWith(APPS)) continue;
+                for (String k : appKeys(card)) {
+                    if (!k.startsWith(SHORTCUT)) continue;
+                    String[] parts = k.substring(SHORTCUT.length()).split(":", 3);
+                    if (parts.length < 3) continue;
+                    String group = parts[0] + ":" + parts[1];
+                    List<String> ids = byPackage.get(group);
+                    if (ids == null) byPackage.put(group, ids = new ArrayList<>());
+                    ids.add(Uri.decode(parts[2]));
+                }
+            }
+            Set<String> previous = prefs.pinnedShortcutGroups();
+            for (String group : previous) {
+                if (!byPackage.containsKey(group)) pin(group, new ArrayList<String>());
+            }
+            for (java.util.Map.Entry<String, List<String>> e : byPackage.entrySet()) pin(e.getKey(), e.getValue());
+            prefs.setPinnedShortcutGroups(byPackage.keySet());
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void pin(String group, List<String> ids) {
+        String[] parts = group.split(":", 2);
+        UserHandle user = userManager.getUserForSerialNumber(Long.parseLong(parts[0]));
+        if (user != null) launcherApps.pinShortcuts(parts[1], ids, user);
+    }
+
+    /** From an app's long-press menu: pick some of its shortcuts and put them on a card. */
+    void addShortcutsFrom(AppInfo app, final List<ShortcutInfo> shortcuts) {
+        if (shortcuts.isEmpty()) return;
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        for (final ShortcutInfo si : shortcuts) {
+            items.add(new SearchablePicker.Item(shortcutLabel(si), app.label, new SearchablePicker.IconSource() {
+                @Override public Drawable load() {
+                    return shortcutIcon(si);
+                }
+            }, null));
+        }
+        SearchablePicker.multi(activity, m, app.label + " shortcuts", items, null, MAX_APPS, "Search shortcuts",
+                "Shortcuts", new SearchablePicker.OnSave() {
+                    @Override public void onSave(List<Integer> selectedInOrder) {
+                        if (selectedInOrder.isEmpty()) return;
+                        List<String> keys = new ArrayList<>();
+                        for (int i : selectedInOrder) keys.add(shortcutKey(shortcuts.get(i)));
+                        chooseTargetCard(keys);
+                    }
+                });
+    }
+
+    private void chooseTargetCard(final List<String> keys) {
+        List<Integer> appCards = new ArrayList<>();
+        for (int i = 0; i < cards.size(); i++) if (cards.get(i).startsWith(APPS)) appCards.add(i);
+        if (appCards.isEmpty()) {
+            insertCard(APPS + TextUtils.join("|", keys));
+            return;
+        }
+        Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, "Add to which card?");
+        for (final int index : appCards) {
+            List<String> existing = appKeys(cards.get(index));
+            List<String> names = new ArrayList<>();
+            for (String k : existing) {
+                Cell c = resolveCell(k);
+                if (c != null) names.add(c.label);
+            }
+            String summary = existing.size() + " of " + MAX_APPS
+                    + (names.isEmpty() ? "" : " · " + TextUtils.join(", ", names));
+            sheet.item(R.drawable.ic_apps, "Card " + (index + 1), summary, new Runnable() {
+                @Override public void run() {
+                    List<String> merged = appKeys(cards.get(index));
+                    int added = 0;
+                    for (String k : keys) {
+                        if (merged.contains(k)) continue;
+                        if (merged.size() >= MAX_APPS) break;
+                        merged.add(k);
+                        added++;
+                    }
+                    if (added < keys.size()) {
+                        Toast.makeText(activity, "That card holds " + MAX_APPS + " tiles; added " + added,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                    cards.set(index, APPS + TextUtils.join("|", merged));
+                    save();
+                    render();
+                    pager.setCurrent(index);
+                }
+            });
+        }
+        sheet.item(R.drawable.ic_add, "New card", "Start a new app card with these", new Runnable() {
+            @Override public void run() {
+                insertCard(APPS + TextUtils.join("|", keys));
+            }
+        });
+        sheet.show();
+    }
+
     // ------------------------------------------------------------- edit
 
-    /** Card options; when opened from an app on an app card, that app's options come first. */
-    private void showCardMenu(final int index, final View anchor, final AppInfo app) {
+    /** Card options; when opened from a tile on an app card, that tile's options come first. */
+    private void showCardMenu(final int index, final View anchor, final Cell cell) {
         anchor.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
         final String card = cards.get(index);
         PopupMenu menu = new PopupMenu(activity, anchor, Gravity.CENTER);
-        if (app != null) {
-            menu.getMenu().add(0, 7, 0, app.label + " options");
-            menu.getMenu().add(0, 8, 0, "Remove " + app.label + " from card");
+        if (cell != null) {
+            if (cell.app != null) menu.getMenu().add(0, 7, 0, cell.label + " options");
+            menu.getMenu().add(0, 8, 0, "Remove " + cell.label + " from card");
         }
-        if (card.startsWith(APPS)) menu.getMenu().add(0, 1, 0, "Choose apps");
+        if (card.startsWith(APPS)) menu.getMenu().add(0, 1, 0, "Choose apps & shortcuts");
         if (cards.size() > 1) {
             menu.getMenu().add(0, 2, 1, "Move left");
             menu.getMenu().add(0, 3, 2, "Move right");
@@ -414,11 +651,11 @@ final class TopCards {
                         render();
                         break;
                     case 7:
-                        host.onAppLongPress(app, anchor);
+                        host.onAppLongPress(cell.app, anchor);
                         break;
                     case 8: {
                         List<String> keys = appKeys(card);
-                        keys.remove(app.key);
+                        keys.remove(cell.key);
                         cards.set(index, APPS + TextUtils.join("|", keys));
                         save();
                         render();
@@ -443,7 +680,8 @@ final class TopCards {
                 });
             }
         });
-        sheet.item(R.drawable.ic_apps, "App shortcuts", "Up to " + MAX_APPS + " apps on one card", new Runnable() {
+        sheet.item(R.drawable.ic_apps, "Apps & shortcuts", "Up to " + MAX_APPS + " apps or shortcuts, e.g. Gmail accounts",
+                new Runnable() {
             @Override public void run() {
                 insertCard(APPS);
                 chooseApps(cards.indexOf(APPS));
@@ -469,24 +707,33 @@ final class TopCards {
 
     private void chooseApps(final int index) {
         if (index < 0) return;
-        final List<AppInfo> apps = new ArrayList<>(host.visibleApps());
+        final List<String> keys = new ArrayList<>();
         List<SearchablePicker.Item> items = new ArrayList<>();
-        java.util.Map<String, Integer> indexByKey = new java.util.HashMap<>();
-        for (int i = 0; i < apps.size(); i++) {
-            items.add(new SearchablePicker.Item(apps.get(i).label, null, apps.get(i).icon));
-            indexByKey.put(apps.get(i).key, i);
+        for (AppInfo a : host.visibleApps()) {
+            keys.add(a.key);
+            items.add(new SearchablePicker.Item(a.label, null, a.icon));
+        }
+        // Other apps' shortcuts too, e.g. each Gmail account or a WhatsApp chat.
+        for (final ShortcutInfo si : allShortcuts()) {
+            keys.add(shortcutKey(si));
+            items.add(new SearchablePicker.Item(shortcutLabel(si), "Shortcut \u00B7 " + appLabel(si.getPackage()),
+                    new SearchablePicker.IconSource() {
+                        @Override public Drawable load() {
+                            return shortcutIcon(si);
+                        }
+                    }, null));
         }
         List<Integer> initial = new ArrayList<>();
         for (String k : appKeys(cards.get(index))) {
-            Integer i = indexByKey.get(k);
-            if (i != null) initial.add(i);
+            int i = keys.indexOf(k);
+            if (i >= 0) initial.add(i);
         }
-        SearchablePicker.multi(activity, m, "Apps on this card", items, initial, MAX_APPS, "Search apps", "All apps",
-                new SearchablePicker.OnSave() {
+        SearchablePicker.multi(activity, m, "Apps & shortcuts", items, initial, MAX_APPS,
+                "Search apps or shortcuts", "Apps, then shortcuts", new SearchablePicker.OnSave() {
                     @Override public void onSave(List<Integer> selectedInOrder) {
-                        List<String> keys = new ArrayList<>();
-                        for (int i : selectedInOrder) keys.add(apps.get(i).key);
-                        cards.set(index, APPS + TextUtils.join("|", keys));
+                        List<String> chosen = new ArrayList<>();
+                        for (int i : selectedInOrder) chosen.add(keys.get(i));
+                        cards.set(index, APPS + TextUtils.join("|", chosen));
                         save();
                         render();
                         pager.setCurrent(index);
@@ -553,6 +800,7 @@ final class TopCards {
 
     private void save() {
         prefs.setCards(cards);
+        syncPins();
     }
 
     private static int parseId(String card) {

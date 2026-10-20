@@ -29,6 +29,7 @@ final class Prefs {
     private static final String CLOCK_SIZE = "clock_size_sp";
     private static final String PREVIEWS = "message_previews";
     private static final String ASKED_DOTS = "asked_dots";
+    private static final String PINNED_GROUPS = "pinned_shortcut_groups";
 
     private final SharedPreferences sp;
 
@@ -166,6 +167,15 @@ final class Prefs {
 
     void setAskedDots() {
         sp.edit().putBoolean(ASKED_DOTS, true).apply();
+    }
+
+    /** "userSerial:package" groups whose shortcuts Chinook has pinned for app cards. */
+    Set<String> pinnedShortcutGroups() {
+        return new HashSet<>(sp.getStringSet(PINNED_GROUPS, Collections.<String>emptySet()));
+    }
+
+    void setPinnedShortcutGroups(Set<String> groups) {
+        sp.edit().putStringSet(PINNED_GROUPS, new HashSet<>(groups)).apply();
     }
 
     String lockNote() {

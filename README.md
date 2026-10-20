@@ -8,7 +8,8 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
 
 - **Top card slider**: the top of the home screen is a row of swipeable cards: the clock card
   (time, date, next alarm), any widgets (weather, calendar, wallet…) and app-shortcut
-  cards (up to 8 apps each, with icons sized to fill the card). Add as many as you like; with 3+ cards it loops endlessly. Long-press a
+  cards (up to 8 apps or app shortcuts each, e.g. one tile per Gmail account with its profile picture;
+  icons are sized to fill the card). Add as many as you like; with 3+ cards it loops endlessly. Long-press a
   card to move, remove or add cards, choose its apps, or change the card height.
 - **Home apps**: your favourites sit low on the screen as a big text list, within thumb reach.
 - **Letter pop-out**: slide along the ★ / # / A–Z strip on the right. ★ shows your home apps. The letters ripple outward, and that
