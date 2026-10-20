@@ -6,7 +6,7 @@ const path = require('path');
   const dir = __dirname, out = path.join(dir, 'out');
   require('fs').mkdirSync(out, { recursive: true });
   const browser = await chromium.launch();
-  const shots = ['home', 'popout', 'cards', 'dark', 'mono', 'settings', 'picker',
+  const shots = ['home', 'popout', 'cards', 'folder', 'dark', 'mono', 'settings', 'picker',
     'lock_aurora', 'lock_dusk', 'lock_graphite', 'lock_horizon', 'lock_monowaves'];
   for (const s of [...shots, 'hero']) {
     const hero = s === 'hero';

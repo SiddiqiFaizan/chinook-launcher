@@ -7,12 +7,14 @@ menu and setting.
 - [Gestures at a glance](#gestures-at-a-glance)
 - [The home screen](#the-home-screen)
 - [Top cards](#top-cards)
+- [Folders](#folders)
 - [Finding and opening apps](#finding-and-opening-apps)
 - [Customising the home screen](#customising-the-home-screen)
 - [Notification badges and previews](#notification-badges-and-previews)
 - [Themes, sizes and fonts](#themes-sizes-and-fonts)
 - [Lock screen designs](#lock-screen-designs)
 - [Hidden apps](#hidden-apps)
+- [Cloned and work apps](#cloned-and-work-apps)
 - [Settings reference](#settings-reference)
 - [Troubleshooting](#troubleshooting)
 
@@ -76,6 +78,30 @@ need Chinook to be your default home app.
 
 **Changing a card:** long-press it (or any tile on it) for *Choose apps & shortcuts*, *Move left /
 right*, *Add card*, *Card height* and *Remove card*. On a tile you also get *Remove from card*.
+
+<br clear="right">
+
+## Folders
+
+<img src="screenshots/folder.jpg" width="280" align="right" alt="A folder card">
+
+Folder cards keep a group of apps together in the top slider, with any number of apps.
+
+- **Create one:** long-press empty space → *Add top card* → **Folder**. Start with an **empty
+  folder** (name it, then pick apps), or tap a **suggestion**. Chinook groups your apps by the
+  category Android gives them (Social, Productivity, Music & audio, Games, Maps & navigation…).
+- **On the card:** the folder's name, its app count, and as many apps as fit. If there are more,
+  the last tile shows **+N**.
+- **Open the whole folder:** tap the name or **+N**. A sheet shows every app, with **Edit apps**
+  and **Rename**.
+- **Change it:** long-press the name or any app for *Open folder*, *Rename folder*, *Choose apps &
+  shortcuts*, *Remove from card*, move, height and *Remove card*.
+- **Shortcuts** (like a Gmail account) can go in folders too, through *Choose apps & shortcuts* or
+  an app's *Add shortcuts to a top card*.
+
+Folders from your phone's original launcher can't be imported: each launcher keeps its folders
+in its own private storage, which Android doesn't let other apps read. The suggestions make
+rebuilding them quick.
 
 <br clear="right">
 
@@ -187,6 +213,17 @@ app list and the pickers. To bring one back:
 The Hidden apps page has an **Unhide** button on each app and a **Hide apps** button to hide more.
 Hiding an app also removes it from your home screen, so re-add it with *Edit home screen → Apps*
 after unhiding.
+
+## Cloned and work apps
+
+If your phone runs a second copy of an app (Dual Messenger, Dual apps, App clone), or you have a
+work profile, both copies appear in Chinook. The copy is labelled with Android's own wording where
+it has one (for example "Work WhatsApp"), otherwise "(Clone)", and shows the profile badge on its
+icon.
+
+Each copy has **its own badge and message preview**, so a message on your second WhatsApp only
+lights up that one. Some phones keep cloned apps in a space other launchers can't see; those
+copies won't appear in Chinook.
 
 ## Settings reference
 

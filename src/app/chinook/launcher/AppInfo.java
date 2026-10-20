@@ -13,6 +13,8 @@ final class AppInfo {
     final String label;
     final String searchLabel;
     final String key;
+    /** Serial of the profile the app lives in (main, work or a cloned/dual-app profile). */
+    final long userSerial;
     final String section;
     final Drawable icon;
 
@@ -22,12 +24,18 @@ final class AppInfo {
         this.label = label;
         this.icon = icon;
         this.key = component.flattenToString() + "#" + userSerial;
+        this.userSerial = userSerial;
         this.searchLabel = normalize(label);
         this.section = sectionFor(searchLabel);
     }
 
     String packageName() {
         return component.getPackageName();
+    }
+
+    /** Notification key: package + profile, so a cloned app's badge is its own. */
+    String badgeKey() {
+        return NotificationDotService.key(component.getPackageName(), userSerial);
     }
 
     /** Lower-case, accent-free form used for searching and sectioning. */

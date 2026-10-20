@@ -106,6 +106,7 @@ final class AppRepository {
                 if (self.equals(info.getComponentName().getPackageName())) continue;
                 CharSequence l = info.getLabel();
                 String label = l == null ? info.getComponentName().getPackageName() : l.toString().trim();
+                if (!user.equals(android.os.Process.myUserHandle())) label = profileLabel(label, user);
                 Drawable icon;
                 try {
                     icon = info.getBadgedIcon(0);
@@ -126,6 +127,19 @@ final class AppRepository {
             }
         });
         return result;
+    }
+
+    /**
+     * Name for an app in another profile, so a cloned or work copy is distinguishable from the
+     * original: Android's own wording when it has one ("Work WhatsApp"), otherwise "(Clone)".
+     */
+    private String profileLabel(String label, UserHandle user) {
+        try {
+            CharSequence badged = context.getPackageManager().getUserBadgedLabel(label, user);
+            if (badged != null && !label.contentEquals(badged)) return badged.toString().trim();
+        } catch (RuntimeException ignored) {
+        }
+        return label + " (Clone)";
     }
 
     void launch(AppInfo app, View source) {

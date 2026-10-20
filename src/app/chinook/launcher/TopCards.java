@@ -50,6 +50,7 @@ final class TopCards {
     private static final String WIDGET = "widget:";
     private static final String APPS = "apps:";
     private static final String SHORTCUT = "s:";
+    private static final String FOLDER = "folder:";
     private static final int MAX_APPS = 8;
     private static final int MIN_HEIGHT_DP = 140;
     private static final int MAX_HEIGHT_DP = 520;
@@ -121,6 +122,7 @@ final class TopCards {
             if (CLOCK.equals(c)) card = clockCard(clock);
             else if (c.startsWith(WIDGET)) card = widgetCard(parseId(c));
             else if (c.startsWith(APPS)) card = appsCard(i, appKeys(c));
+            else if (c.startsWith(FOLDER)) card = folderCard(i, c);
             else card = null;
             if (card == null) {
                 if (c.startsWith(WIDGET)) {
@@ -372,8 +374,8 @@ final class TopCards {
         iconBox.addView(icon, new FrameLayout.LayoutParams(dp(iconDp), dp(iconDp), Gravity.CENTER));
         if (cell.app != null) {
             TextView badge = m.badge();
-            badge.setTag(cell.app.packageName());
-            M3.setBadgeCount(badge, NotificationDotService.count(cell.app.packageName()));
+            badge.setTag(cell.app.badgeKey());
+            M3.setBadgeCount(badge, NotificationDotService.count(cell.app.badgeKey()));
             iconBox.addView(badge, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, dp(M3.BADGE_DP), Gravity.TOP | Gravity.END));
             badges.add(badge);
@@ -501,7 +503,7 @@ final class TopCards {
             if (!launcherApps.hasShortcutHostPermission()) return;
             java.util.Map<String, List<String>> byPackage = new java.util.HashMap<>();
             for (String card : cards) {
-                if (!card.startsWith(APPS)) continue;
+                if (!isTileCard(card)) continue;
                 for (String k : appKeys(card)) {
                     if (!k.startsWith(SHORTCUT)) continue;
                     String[] parts = k.substring(SHORTCUT.length()).split(":", 3);
@@ -552,28 +554,30 @@ final class TopCards {
 
     private void chooseTargetCard(final List<String> keys) {
         List<Integer> appCards = new ArrayList<>();
-        for (int i = 0; i < cards.size(); i++) if (cards.get(i).startsWith(APPS)) appCards.add(i);
+        for (int i = 0; i < cards.size(); i++) if (isTileCard(cards.get(i))) appCards.add(i);
         if (appCards.isEmpty()) {
             insertCard(APPS + TextUtils.join("|", keys));
             return;
         }
         Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, "Add to which card?");
         for (final int index : appCards) {
+            final boolean folder = cards.get(index).startsWith(FOLDER);
             List<String> existing = appKeys(cards.get(index));
             List<String> names = new ArrayList<>();
             for (String k : existing) {
                 Cell c = resolveCell(k);
                 if (c != null) names.add(c.label);
             }
-            String summary = existing.size() + " of " + MAX_APPS
+            String summary = (folder ? existing.size() + " apps" : existing.size() + " of " + MAX_APPS)
                     + (names.isEmpty() ? "" : " · " + TextUtils.join(", ", names));
-            sheet.item(R.drawable.ic_apps, "Card " + (index + 1), summary, new Runnable() {
+            sheet.item(folder ? R.drawable.ic_folder : R.drawable.ic_apps,
+                    folder ? folderName(cards.get(index)) : "Card " + (index + 1), summary, new Runnable() {
                 @Override public void run() {
                     List<String> merged = appKeys(cards.get(index));
                     int added = 0;
                     for (String k : keys) {
                         if (merged.contains(k)) continue;
-                        if (merged.size() >= MAX_APPS) break;
+                        if (!folder && merged.size() >= MAX_APPS) break;
                         merged.add(k);
                         added++;
                     }
@@ -581,7 +585,7 @@ final class TopCards {
                         Toast.makeText(activity, "That card holds " + MAX_APPS + " tiles; added " + added,
                                 Toast.LENGTH_SHORT).show();
                     }
-                    cards.set(index, APPS + TextUtils.join("|", merged));
+                    cards.set(index, withKeys(cards.get(index), merged));
                     save();
                     render();
                     pager.setCurrent(index);
@@ -596,6 +600,346 @@ final class TopCards {
         sheet.show();
     }
 
+    // ---------------------------------------------------------- folders
+
+    /** "folder:<encoded name>|key|key..." */
+    private static String folderName(String card) {
+        String s = card.substring(FOLDER.length());
+        int bar = s.indexOf('|');
+        return Uri.decode(bar < 0 ? s : s.substring(0, bar));
+    }
+
+    private static boolean isTileCard(String card) {
+        return card.startsWith(APPS) || card.startsWith(FOLDER);
+    }
+
+    /** The same card with a new list of tiles (keeps a folder's name). */
+    private static String withKeys(String card, List<String> keys) {
+        if (card.startsWith(FOLDER)) {
+            String head = FOLDER + Uri.encode(folderName(card));
+            return keys.isEmpty() ? head : head + "|" + TextUtils.join("|", keys);
+        }
+        return APPS + TextUtils.join("|", keys);
+    }
+
+    private void openCell(Cell cell, View view) {
+        if (cell.app != null) host.launch(cell.app, view);
+        else startShortcut(cell.shortcut, view);
+    }
+
+    /**
+     * Folder card: a named group with any number of apps. Shows as many as fit, with a "+N" tile;
+     * the header or "+N" opens the whole folder.
+     */
+    private View folderCard(final int index, String card) {
+        final String name = folderName(card);
+        List<Cell> cells = new ArrayList<>();
+        for (String k : appKeys(card)) {
+            Cell c = resolveCell(k);
+            if (c != null) cells.add(c);
+        }
+        FrameLayout frame = roundedCard();
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setPadding(dp(12), dp(8), dp(12), dp(10));
+
+        LinearLayout header = new LinearLayout(activity);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(8), 0, dp(4), 0);
+        header.setBackground(m.ripple(theme.text, null, 16));
+        ImageView folderIcon = m.iconView(R.drawable.ic_folder, theme.textSecondary, 20);
+        ((LinearLayout.LayoutParams) folderIcon.getLayoutParams()).rightMargin = dp(10);
+        header.addView(folderIcon);
+        TextView title = m.text(name, M3.TITLE_MEDIUM, theme.text);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView count = m.text(cells.size() + (cells.size() == 1 ? " app" : " apps"), M3.BODY_MEDIUM, theme.textSecondary);
+        header.addView(count);
+        header.addView(m.iconView(R.drawable.ic_chevron_right, theme.textSecondary, 20));
+        header.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                openFolder(index);
+            }
+        });
+        header.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                showCardMenu(index, v, null);
+                return true;
+            }
+        });
+        column.addView(header, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)));
+
+        if (cells.isEmpty()) {
+            if (!appKeys(card).isEmpty() && host.visibleApps().isEmpty()) {
+                frame.addView(column);
+                return frame; // apps still loading
+            }
+            TextView t = m.text("Empty folder · tap the name to add apps", M3.BODY_MEDIUM, theme.textSecondary);
+            t.setGravity(Gravity.CENTER);
+            column.addView(t, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            frame.addView(column);
+            return frame;
+        }
+
+        // Fit as many rows as the card allows; labels only when there's room for them.
+        int n = cells.size();
+        int columns = Math.min(4, n);
+        float gridW = activity.getResources().getDisplayMetrics().widthPixels / density - 74 - 24;
+        float gridH = prefs.cardHeightDp() - 18 - 36 - 6;
+        boolean labels = gridH / 76f >= 1;
+        int rows = Math.max(1, (int) Math.floor(gridH / (labels ? 76f : 52f)));
+        int capacity = rows * columns;
+        boolean overflow = n > capacity;
+        int shown = overflow ? capacity - 1 : n;
+        int usedRows = (int) Math.ceil((shown + (overflow ? 1 : 0)) / (float) columns);
+        float cellW = gridW / columns;
+        float cellH = gridH / Math.max(1, usedRows);
+        int iconDp = Math.round(Math.min(cellW * 0.55f, (cellH - (labels ? 26 : 0) - 12) * 0.9f));
+        iconDp = Math.max(28, Math.min(64, iconDp));
+
+        int i = 0;
+        for (int row = 0; row < usedRows; row++) {
+            LinearLayout line = new LinearLayout(activity);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            line.setWeightSum(columns);
+            line.setGravity(Gravity.CENTER);
+            for (int c = 0; c < columns; c++) {
+                View tile;
+                if (i < shown) tile = cellView(index, cells.get(i), iconDp, labels);
+                else if (overflow && i == shown) tile = moreTile(index, n - shown, iconDp, labels);
+                else break;
+                line.addView(tile, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+                i++;
+            }
+            column.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        }
+        frame.addView(column, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return frame;
+    }
+
+    private View moreTile(final int index, int more, int iconDp, boolean showLabel) {
+        LinearLayout v = new LinearLayout(activity);
+        v.setOrientation(LinearLayout.VERTICAL);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(4), dp(4), dp(4), dp(4));
+        v.setBackground(m.ripple(theme.text, null, 20));
+        TextView circle = m.text("+" + more, M3.TITLE_MEDIUM, theme.text);
+        circle.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(M3.withAlpha(theme.text, 0.14f));
+        circle.setBackground(bg);
+        v.addView(circle, new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)));
+        if (showLabel) {
+            TextView label = m.text("More", M3.LABEL_MEDIUM, theme.textSecondary);
+            label.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(6);
+            v.addView(label, lp);
+        }
+        v.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                openFolder(index);
+            }
+        });
+        return v;
+    }
+
+    /** The whole folder as a sheet: a grid of every app, plus edit and rename. */
+    private void openFolder(final int index) {
+        String card = cards.get(index);
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, folderName(card));
+        List<Cell> cells = new ArrayList<>();
+        for (String k : appKeys(card)) {
+            Cell c = resolveCell(k);
+            if (c != null) cells.add(c);
+        }
+        if (cells.isEmpty()) {
+            TextView t = m.text("This folder is empty.", M3.BODY_LARGE, m.onSurfaceVariant);
+            t.setPadding(dp(24), dp(8), dp(24), dp(16));
+            sheet.add(t);
+        }
+        LinearLayout grid = new LinearLayout(activity);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        grid.setPadding(dp(12), 0, dp(12), dp(8));
+        LinearLayout line = null;
+        for (int i = 0; i < cells.size(); i++) {
+            if (i % 4 == 0) {
+                line = new LinearLayout(activity);
+                line.setOrientation(LinearLayout.HORIZONTAL);
+                line.setWeightSum(4);
+                grid.addView(line);
+            }
+            final Cell cell = cells.get(i);
+            LinearLayout tile = new LinearLayout(activity);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER_HORIZONTAL);
+            tile.setPadding(dp(4), dp(10), dp(4), dp(10));
+            tile.setBackground(m.ripple(m.onSurface, null, 20));
+            ImageView icon = new ImageView(activity);
+            icon.setImageDrawable(cell.icon);
+            if (theme.grayscale) icon.setColorFilter(Theme.grayscaleFilter());
+            FrameLayout iconBox = new FrameLayout(activity);
+            iconBox.addView(icon, new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER));
+            if (cell.app != null) {
+                TextView badge = m.badge();
+                M3.setBadgeCount(badge, NotificationDotService.count(cell.app.badgeKey()));
+                iconBox.addView(badge, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, dp(M3.BADGE_DP), Gravity.TOP | Gravity.END));
+            }
+            tile.addView(iconBox, new LinearLayout.LayoutParams(dp(60), dp(56)));
+            TextView label = m.text(cell.label, M3.LABEL_MEDIUM, m.onSurface);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            label.setGravity(Gravity.CENTER);
+            label.setMaxLines(2);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(6);
+            tile.addView(label, lp);
+            tile.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(final View v) {
+                    sheet.dismissThen(new Runnable() {
+                        @Override public void run() {
+                            openCell(cell, v);
+                        }
+                    });
+                }
+            });
+            if (cell.app != null) {
+                tile.setOnLongClickListener(new View.OnLongClickListener() {
+                    @Override public boolean onLongClick(View v) {
+                        host.onAppLongPress(cell.app, v);
+                        return true;
+                    }
+                });
+            }
+            line.addView(tile, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        sheet.add(grid);
+        sheet.action(m.textButton("Rename", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sheet.dismissThen(new Runnable() {
+                    @Override public void run() {
+                        renameFolder(index);
+                    }
+                });
+            }
+        }));
+        sheet.action(m.tonalButton("Edit apps", R.drawable.ic_edit, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sheet.dismissThen(new Runnable() {
+                    @Override public void run() {
+                        chooseApps(index);
+                    }
+                });
+            }
+        }));
+        sheet.show();
+    }
+
+    private interface NameCallback {
+        void onName(String name);
+    }
+
+    private void promptFolderName(String initial, final NameCallback callback) {
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, initial == null ? "New folder" : "Rename folder");
+        final android.widget.EditText field = new android.widget.EditText(activity);
+        field.setHint("e.g. Social, Work, Travel");
+        if (initial != null) field.setText(initial);
+        field.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        LinearLayout box = m.outlinedField(field, "Folder name");
+        box.setPadding(dp(24), 0, dp(24), dp(8));
+        sheet.add(box);
+        sheet.action(m.textButton("Cancel", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sheet.dismiss();
+            }
+        }));
+        sheet.action(m.filledButton(initial == null ? "Next" : "Save", 0, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                final String name = field.getText().toString().trim();
+                sheet.dismissThen(new Runnable() {
+                    @Override public void run() {
+                        callback.onName(name.isEmpty() ? "Folder" : name);
+                    }
+                });
+            }
+        }));
+        sheet.show();
+        field.requestFocus();
+    }
+
+    private void renameFolder(final int index) {
+        promptFolderName(folderName(cards.get(index)), new NameCallback() {
+            @Override public void onName(String name) {
+                List<String> keys = appKeys(cards.get(index));
+                String head = FOLDER + Uri.encode(name);
+                cards.set(index, keys.isEmpty() ? head : head + "|" + TextUtils.join("|", keys));
+                save();
+                render();
+                pager.setCurrent(index);
+            }
+        });
+    }
+
+    /**
+     * New folder: start empty, or from a suggestion built from Android's app categories (Social,
+     * Productivity, Games...) - the quickest way to recreate the groups from another launcher.
+     */
+    private void showNewFolder() {
+        Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, "New folder");
+        sheet.item(R.drawable.ic_create_new_folder, "Empty folder", "Name it, then choose its apps", new Runnable() {
+            @Override public void run() {
+                promptFolderName(null, new NameCallback() {
+                    @Override public void onName(String name) {
+                        insertCard(FOLDER + Uri.encode(name));
+                        chooseApps(pager.currentIndex());
+                    }
+                });
+            }
+        });
+        android.content.pm.PackageManager pm = activity.getPackageManager();
+        java.util.Map<Integer, List<AppInfo>> byCategory = new java.util.TreeMap<>();
+        for (AppInfo a : host.visibleApps()) {
+            try {
+                int cat = pm.getApplicationInfo(a.packageName(), 0).category;
+                if (cat == android.content.pm.ApplicationInfo.CATEGORY_UNDEFINED) continue;
+                List<AppInfo> group = byCategory.get(cat);
+                if (group == null) byCategory.put(cat, group = new ArrayList<>());
+                group.add(a);
+            } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException ignored) {
+            }
+        }
+        boolean any = false;
+        for (java.util.Map.Entry<Integer, List<AppInfo>> e : byCategory.entrySet()) {
+            final List<AppInfo> group = e.getValue();
+            if (group.size() < 2) continue;
+            CharSequence t = android.content.pm.ApplicationInfo.getCategoryTitle(activity, e.getKey());
+            if (t == null) continue;
+            if (!any) {
+                sheet.add(m.subheader("Suggested from your apps"));
+                any = true;
+            }
+            final String title = t.toString();
+            List<String> names = new ArrayList<>();
+            for (int i = 0; i < Math.min(4, group.size()); i++) names.add(group.get(i).label);
+            String summary = group.size() + " apps · " + TextUtils.join(", ", names) + (group.size() > 4 ? "…" : "");
+            sheet.item(R.drawable.ic_folder, title, summary, new Runnable() {
+                @Override public void run() {
+                    List<String> keys = new ArrayList<>();
+                    for (AppInfo a : group) keys.add(a.key);
+                    insertCard(FOLDER + Uri.encode(title) + "|" + TextUtils.join("|", keys));
+                }
+            });
+        }
+        sheet.show();
+    }
+
     // ------------------------------------------------------------- edit
 
     /** Card options; when opened from a tile on an app card, that tile's options come first. */
@@ -607,7 +951,11 @@ final class TopCards {
             if (cell.app != null) menu.getMenu().add(0, 7, 0, cell.label + " options");
             menu.getMenu().add(0, 8, 0, "Remove " + cell.label + " from card");
         }
-        if (card.startsWith(APPS)) menu.getMenu().add(0, 1, 0, "Choose apps & shortcuts");
+        if (card.startsWith(FOLDER)) {
+            menu.getMenu().add(0, 10, 0, "Open folder");
+            menu.getMenu().add(0, 9, 0, "Rename folder");
+        }
+        if (isTileCard(card)) menu.getMenu().add(0, 1, 0, "Choose apps & shortcuts");
         if (cards.size() > 1) {
             menu.getMenu().add(0, 2, 1, "Move left");
             menu.getMenu().add(0, 3, 2, "Move right");
@@ -653,10 +1001,16 @@ final class TopCards {
                     case 7:
                         host.onAppLongPress(cell.app, anchor);
                         break;
+                    case 9:
+                        renameFolder(index);
+                        break;
+                    case 10:
+                        openFolder(index);
+                        break;
                     case 8: {
                         List<String> keys = appKeys(card);
                         keys.remove(cell.key);
-                        cards.set(index, APPS + TextUtils.join("|", keys));
+                        cards.set(index, withKeys(card, keys));
                         save();
                         render();
                         pager.setCurrent(index);
@@ -685,6 +1039,11 @@ final class TopCards {
             @Override public void run() {
                 insertCard(APPS);
                 chooseApps(cards.indexOf(APPS));
+            }
+        });
+        sheet.item(R.drawable.ic_folder, "Folder", "A named group with any number of apps", new Runnable() {
+            @Override public void run() {
+                showNewFolder();
             }
         });
         if (!cards.contains(CLOCK)) {
@@ -728,12 +1087,15 @@ final class TopCards {
             int i = keys.indexOf(k);
             if (i >= 0) initial.add(i);
         }
-        SearchablePicker.multi(activity, m, "Apps & shortcuts", items, initial, MAX_APPS,
-                "Search apps or shortcuts", "Apps, then shortcuts", new SearchablePicker.OnSave() {
+        final String card = cards.get(index);
+        boolean folder = card.startsWith(FOLDER);
+        // Folders hold any number of apps; app cards up to MAX_APPS.
+        SearchablePicker.multi(activity, m, folder ? folderName(card) : "Apps & shortcuts", items, initial,
+                folder ? 0 : MAX_APPS, "Search apps or shortcuts", "Apps, then shortcuts", new SearchablePicker.OnSave() {
                     @Override public void onSave(List<Integer> selectedInOrder) {
                         List<String> chosen = new ArrayList<>();
                         for (int i : selectedInOrder) chosen.add(keys.get(i));
-                        cards.set(index, APPS + TextUtils.join("|", chosen));
+                        cards.set(index, withKeys(cards.get(index), chosen));
                         save();
                         render();
                         pager.setCurrent(index);
@@ -812,9 +1174,16 @@ final class TopCards {
     }
 
     private static List<String> appKeys(String card) {
+        List<String> keys = new ArrayList<>();
+        if (card.startsWith(FOLDER)) {
+            String[] parts = card.substring(FOLDER.length()).split("\\|");
+            for (int i = 1; i < parts.length; i++) if (!parts[i].isEmpty()) keys.add(parts[i]);
+            return keys;
+        }
         String s = card.substring(APPS.length());
-        if (s.isEmpty()) return new ArrayList<>();
-        return new ArrayList<>(Arrays.asList(s.split("\\|")));
+        if (s.isEmpty()) return keys;
+        keys.addAll(Arrays.asList(s.split("\\|")));
+        return keys;
     }
 
     private int dp(float v) {

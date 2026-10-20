@@ -153,7 +153,29 @@ function homeScreen(themeName, opts = {}) {
 
   // Top card slider (250dp) with the clock card or an app card.
   const pager = el('div', 'height:250px;margin-top:20px;position:relative');
-  if (opts.appCard) {
+  if (opts.folderCard) {
+    const card = el('div', `position:absolute;inset:0;border-radius:28px;background:${t.card};padding:8px 12px 10px;
+      display:flex;flex-direction:column`);
+    card.innerHTML = `<div style="height:36px;display:flex;align-items:center;padding:0 4px 0 8px;gap:10px">
+      ${icon('folder', t.sec, 20)}<div style="flex:1;font-size:16px;font-weight:600;color:${t.text}">Social</div>
+      <div style="font-size:14px;color:${t.sec}">9 apps</div>${icon('chevron_right', t.sec, 20)}</div>`;
+    const names = ['Messages', 'Meet', 'Photos', 'Camera', 'Music', 'Mail', 'Maps'];
+    for (let r = 0; r < 2; r++) {
+      const line = el('div', 'flex:1;display:flex;align-items:center');
+      for (let c = 0; c < 4; c++) {
+        const i = r * 4 + c;
+        const cell = el('div', 'flex:1;display:flex;flex-direction:column;align-items:center;gap:6px');
+        if (i < 7) cell.innerHTML = `<div style="position:relative">${appIcon(names[i], 44, t)}
+          ${i === 0 ? `<span class="badge" style="position:absolute;top:-3px;right:-4px;margin:0;background:${t.badgeBg};color:${t.badgeFg}">3</span>` : ''}</div>
+          <div style="font-size:12px;font-weight:600;color:${t.text}">${names[i]}</div>`;
+        else cell.innerHTML = `<div class="appicon" style="width:44px;height:44px;background:rgba(255,255,255,.14);font-size:16px">+2</div>
+          <div style="font-size:12px;font-weight:600;color:${t.sec}">More</div>`;
+        line.appendChild(cell);
+      }
+      card.appendChild(line);
+    }
+    pager.appendChild(card);
+  } else if (opts.appCard) {
     const card = el('div', `position:absolute;inset:0;border-radius:28px;background:${t.card};padding:12px;
       display:flex;align-items:center;`);
     const tiles = [['Personal', '#7E57C2', 'P'], ['Work', '#00897B', 'W'], ['Studio', '#F4511E', 'S'], ['Wallet', null, null]];
@@ -177,7 +199,7 @@ function homeScreen(themeName, opts = {}) {
     pager.appendChild(clock);
   }
   home.appendChild(pager);
-  const active = opts.appCard ? 1 : 0;
+  const active = opts.appCard ? 1 : opts.folderCard ? 2 : 0;
   home.appendChild(el('div', 'height:18px;margin-top:8px;display:flex;justify-content:center;align-items:center;gap:6px',
     [0, 1, 2].map(i => `<span style="width:${i === active ? 7 : 5}px;height:${i === active ? 7 : 5}px;border-radius:50%;
       background:${t.text};opacity:${i === active ? .95 : .3}"></span>`).join('')));
@@ -337,6 +359,7 @@ document.fonts.load('600 20px Manrope').then(() => {
     home: () => homeScreen('colored'),
     popout: () => homeScreen('colored', { popout: true }),
     cards: () => homeScreen('colored', { appCard: true }),
+    folder: () => homeScreen('colored', { folderCard: true }),
     dark: () => homeScreen('dark'),
     mono: () => homeScreen('mono'),
     settings: settingsScreen,

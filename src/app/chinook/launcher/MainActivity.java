@@ -700,7 +700,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         for (int i = 0; i < panelList.getChildCount(); i++) {
             Object tag = panelList.getChildAt(i).getTag();
             if (tag instanceof Row && ((Row) tag).app != null) {
-                setRowBadge((Row) tag, NotificationDotService.count(((Row) tag).app.packageName()));
+                setRowBadge((Row) tag, NotificationDotService.count(((Row) tag).app.badgeKey()));
             }
         }
     }
@@ -2092,10 +2092,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.iconBox.setVisibility(style == STYLE_HOME && !prefs.showHomeIcons() ? View.GONE : View.VISIBLE);
         r.label.setText(app.label);
         r.label.setTextColor(theme.text);
-        setRowBadge(r, NotificationDotService.count(app.packageName()));
+        setRowBadge(r, NotificationDotService.count(app.badgeKey()));
         // Home screen apps show the newest message under their name, like a quiet inbox.
         String preview = style == STYLE_HOME && prefs.messagePreviews() && !editMode
-                ? NotificationDotService.preview(app.packageName()) : null;
+                ? NotificationDotService.preview(app.badgeKey()) : null;
         r.preview.setText(preview);
         r.preview.setVisibility(preview == null ? View.GONE : View.VISIBLE);
     }

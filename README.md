@@ -31,6 +31,11 @@ no ads, no tracking, no account, and no internet permission. The whole app is un
 | <img src="docs/screenshots/picker.jpg" width="240" alt="Full-screen search picker for apps and shortcuts"> | <img src="docs/screenshots/lock_aurora.jpg" width="240" alt="Aurora lock screen design"> | <img src="docs/screenshots/lock_monowaves.jpg" width="240" alt="Mono waves lock screen design"> |
 | Every "add" list has search, sections and a live count | Generated wallpapers for each theme | Android still draws the lock-screen clock |
 
+| Folder cards | Lock screen: Dusk | Lock screen: Horizon |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/folder.jpg" width="240" alt="A folder card in the top slider"> | <img src="docs/screenshots/lock_dusk.jpg" width="240" alt="Dusk lock screen design"> | <img src="docs/screenshots/lock_horizon.jpg" width="240" alt="Horizon lock screen design with a note"> |
+| Named groups with any number of apps; tap for the whole folder | Colored | Black & White, with an optional note |
+
 ## Features
 
 ### Home screen
@@ -38,12 +43,15 @@ no ads, no tracking, no account, and no internet permission. The whole app is un
   Optional icons, with adjustable text, icon and clock sizes for the home screen and the app list.
 - **Top card slider.** Swipe the top of the screen between cards: the **clock** (time, date, next
   alarm), any **widget** (weather, calendar, wallet, music…), and **app cards** holding up to 8
-  apps or app shortcuts, such as one tile per Gmail account showing its profile picture. With three
-  or more cards it loops endlessly. Widgets get their exact size, and app-card icons scale to fill
+  apps or app shortcuts, such as one tile per Gmail account showing its profile picture, and
+  **folder cards**: named groups with any number of apps, with suggestions built from your app
+  categories. With three or more cards it loops endlessly. Widgets get their exact size, and app-card icons scale to fill
   the card.
 - **World clocks.** A row of cities just under the cards, with +1 / −1 when it's a different day.
 - **Notification badges and previews.** Unread counts on every app, and the newest message under
   your home apps (needs notification access; a guide walks you through it).
+- **Cloned and work apps.** A second copy of an app (e.g. dual WhatsApp) is labelled as such and
+  gets its own badge and message preview.
 
 ### Finding apps
 - **Alphabet strip.** ★ (your home apps), #, then A–Z down the right edge. Slide along it and the

@@ -34,18 +34,19 @@ public class NotificationDotService extends NotificationListenerService {
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static Listener listener;
 
-    static synchronized boolean hasDot(String packageName) {
-        return active.containsKey(packageName);
+    /** "package#profileSerial": the same app in a cloned or work profile counts separately. */
+    static String key(String packageName, long userSerial) {
+        return packageName + "#" + userSerial;
     }
 
-    static synchronized int count(String packageName) {
-        Info i = active.get(packageName);
+    static synchronized int count(String badgeKey) {
+        Info i = active.get(badgeKey);
         return i == null ? 0 : i.count;
     }
 
     /** "Title: text" of the newest notification, or null. */
-    static synchronized String preview(String packageName) {
-        Info i = active.get(packageName);
+    static synchronized String preview(String badgeKey) {
+        Info i = active.get(badgeKey);
         if (i == null) return null;
         String title = i.title == null ? "" : i.title.toString().trim();
         String text = i.text == null ? "" : i.text.toString().trim().replace('\n', ' ');
@@ -121,13 +122,18 @@ public class NotificationDotService extends NotificationListenerService {
             return;
         }
         seenNotifications = all == null ? 0 : all.length;
+        android.os.UserManager um = (android.os.UserManager) getSystemService(Context.USER_SERVICE);
         Map<String, Info> next = new HashMap<>();
         Map<String, Boolean> onlySummary = new HashMap<>();
         if (all != null) {
             for (StatusBarNotification sbn : all) {
                 if (sbn.isOngoing() || !sbn.isClearable()) continue;
                 Notification n = sbn.getNotification();
-                String pkg = sbn.getPackageName();
+                // Key by package *and* profile, so two WhatsApps (original + clone) stay apart.
+                long serial = um == null ? -1 : um.getSerialNumberForUser(sbn.getUser());
+                // Notifications posted for all users have no single profile: count them on the main one.
+                if (serial < 0 && um != null) serial = um.getSerialNumberForUser(android.os.Process.myUserHandle());
+                String pkg = key(sbn.getPackageName(), serial);
                 boolean summary = (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0;
                 Info info = next.get(pkg);
                 if (info == null) {
