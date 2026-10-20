@@ -108,7 +108,7 @@ final class TopCards {
             View card;
             if (CLOCK.equals(c)) card = clockCard(clock);
             else if (c.startsWith(WIDGET)) card = widgetCard(parseId(c));
-            else if (c.startsWith(APPS)) card = appsCard(appKeys(c));
+            else if (c.startsWith(APPS)) card = appsCard(i, appKeys(c));
             else card = null;
             if (card == null) {
                 if (c.startsWith(WIDGET)) {
@@ -120,7 +120,7 @@ final class TopCards {
             final int index = i;
             card.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override public boolean onLongClick(View v) {
-                    showCardMenu(index, v);
+                    showCardMenu(index, v, null);
                     return true;
                 }
             });
@@ -254,7 +254,7 @@ final class TopCards {
         return card;
     }
 
-    private View appsCard(List<String> keys) {
+    private View appsCard(int index, List<String> keys) {
         List<AppInfo> apps = new ArrayList<>();
         for (String k : keys) {
             AppInfo a = host.findApp(k);
@@ -296,7 +296,7 @@ final class TopCards {
             for (int c = 0; c < columns; c++) {
                 int i = row * columns + c;
                 if (i >= n) break;
-                line.addView(appCell(apps.get(i), iconDp, showLabels),
+                line.addView(appCell(index, apps.get(i), iconDp, showLabels),
                         new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
             }
             grid.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -306,7 +306,7 @@ final class TopCards {
         return card;
     }
 
-    private View appCell(final AppInfo app, int iconDp, boolean showLabel) {
+    private View appCell(final int cardIndex, final AppInfo app, int iconDp, boolean showLabel) {
         LinearLayout cell = new LinearLayout(activity);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER);
@@ -344,9 +344,10 @@ final class TopCards {
                 host.launch(app, v);
             }
         });
+        // The apps fill the whole card, so their long-press menu also carries the card's options.
         cell.setOnLongClickListener(new View.OnLongClickListener() {
             @Override public boolean onLongClick(View v) {
-                host.onAppLongPress(app, v);
+                showCardMenu(cardIndex, v, app);
                 return true;
             }
         });
@@ -360,10 +361,15 @@ final class TopCards {
 
     // ------------------------------------------------------------- edit
 
-    private void showCardMenu(final int index, View anchor) {
+    /** Card options; when opened from an app on an app card, that app's options come first. */
+    private void showCardMenu(final int index, final View anchor, final AppInfo app) {
         anchor.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
         final String card = cards.get(index);
         PopupMenu menu = new PopupMenu(activity, anchor, Gravity.CENTER);
+        if (app != null) {
+            menu.getMenu().add(0, 7, 0, app.label + " options");
+            menu.getMenu().add(0, 8, 0, "Remove " + app.label + " from card");
+        }
         if (card.startsWith(APPS)) menu.getMenu().add(0, 1, 0, "Choose apps");
         if (cards.size() > 1) {
             menu.getMenu().add(0, 2, 1, "Move left");
@@ -407,6 +413,18 @@ final class TopCards {
                         save();
                         render();
                         break;
+                    case 7:
+                        host.onAppLongPress(app, anchor);
+                        break;
+                    case 8: {
+                        List<String> keys = appKeys(card);
+                        keys.remove(app.key);
+                        cards.set(index, APPS + TextUtils.join("|", keys));
+                        save();
+                        render();
+                        pager.setCurrent(index);
+                        break;
+                    }
                 }
                 return true;
             }

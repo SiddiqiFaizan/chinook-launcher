@@ -566,7 +566,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             visibleApps.add(a);
             sections.add(a.section);
         }
-        adapter.setApps(visibleApps, favoriteApps());
+        adapter.setApps(visibleApps, favoriteApps(), hiddenApps());
         scroller.setLetters(new ArrayList<>(sections));
         renderFavorites();
     }
@@ -1132,7 +1132,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             menu.add(1, 4, 100, "Add to home");
         }
         menu.add(2, 5, 200, "App info");
-        menu.add(2, 6, 201, "Hide");
+        final boolean isHidden = prefs.hidden().contains(app.key);
+        menu.add(2, 6, 201, isHidden ? "Unhide" : "Hide");
         menu.add(2, 7, 202, "Uninstall");
         popup.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
             @Override public boolean onMenuItemClick(MenuItem item) {
@@ -1162,17 +1163,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         } catch (RuntimeException ignored) {
                         }
                         return true;
-                    case 6: {
-                        Set<String> hidden = prefs.hidden();
-                        hidden.add(app.key);
-                        prefs.setHidden(hidden);
-                        favorites.remove(app.key);
-                        prefs.setFavorites(favorites);
+                    case 6:
                         hidePanel(false);
-                        applyApps();
-                        Toast.makeText(MainActivity.this, app.label + " hidden. Unhide it in settings.", Toast.LENGTH_SHORT).show();
+                        setAppHidden(app, !isHidden);
+                        Toast.makeText(MainActivity.this, isHidden ? app.label + " is visible again"
+                                : app.label + " hidden. Find it under Hidden apps at the end of the app list.",
+                                Toast.LENGTH_LONG).show();
                         return true;
-                    }
                     case 7: {
                         Intent i = new Intent(Intent.ACTION_DELETE, Uri.fromParts("package", app.packageName(), null));
                         i.putExtra(Intent.EXTRA_USER, app.user);
@@ -1263,6 +1260,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 .item(R.drawable.ic_palette, "Theme", Theme.NAMES[theme.id], new Runnable() {
                     @Override public void run() {
                         showThemePicker();
+                    }
+                })
+                .item(R.drawable.ic_visibility_off, "Hidden apps", hiddenSummary(), new Runnable() {
+                    @Override public void run() {
+                        showHiddenApps();
                     }
                 })
                 .item(R.drawable.ic_lock, "Lock screen", "Minimal wallpaper designs", new Runnable() {
@@ -1556,11 +1558,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 }));
 
         c.addView(m3.subheader("Apps"));
-        int hiddenCount = 0;
-        Set<String> hidden = prefs.hidden();
-        for (AppInfo a : rawApps) if (hidden.contains(a.key)) hiddenCount++;
-        c.addView(m3.listItem(R.drawable.ic_visibility_off, null, "Hidden apps",
-                hiddenCount == 0 ? "None" : hiddenCount + (hiddenCount == 1 ? " app" : " apps"), null, run(new Runnable() {
+        c.addView(m3.listItem(R.drawable.ic_visibility_off, null, "Hidden apps", hiddenSummary(), null, run(new Runnable() {
                     @Override public void run() {
                         showHiddenApps();
                     }
@@ -1629,26 +1627,92 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         }
     }
 
-    private void showHiddenApps() {
-        final List<AppInfo> apps = new ArrayList<>(rawApps);
+    private List<AppInfo> hiddenApps() {
         Set<String> hidden = prefs.hidden();
-        List<SearchablePicker.Item> items = new ArrayList<>();
-        List<Integer> initial = new ArrayList<>();
-        for (int i = 0; i < apps.size(); i++) {
-            items.add(new SearchablePicker.Item(apps.get(i).label, null, apps.get(i).icon));
-            if (hidden.contains(apps.get(i).key)) initial.add(i);
+        List<AppInfo> out = new ArrayList<>();
+        for (AppInfo a : rawApps) if (hidden.contains(a.key)) out.add(a);
+        return out;
+    }
+
+    private String hiddenSummary() {
+        int n = hiddenApps().size();
+        return n == 0 ? "None \u00B7 hide apps you rarely use" : n + (n == 1 ? " app" : " apps") + " \u00B7 tap to unhide";
+    }
+
+    private void setAppHidden(AppInfo app, boolean hide) {
+        Set<String> hidden = prefs.hidden();
+        if (hide) {
+            hidden.add(app.key);
+            favorites.remove(app.key);
+            prefs.setFavorites(favorites);
+        } else {
+            hidden.remove(app.key);
         }
-        SearchablePicker.multi(this, m3, "Hidden apps", items, initial, 0, "Search apps", "Visible apps",
+        prefs.setHidden(hidden);
+        applyApps();
+        if (settingsPage != null) buildSettings();
+    }
+
+    /** Lists hidden apps with an Unhide button each, plus a way to hide more. */
+    private void showHiddenApps() {
+        final Surfaces.Page page = new Surfaces.Page(this, m3, "Hidden apps");
+        final LinearLayout column = page.scrollingBody();
+        final Runnable[] rebuild = new Runnable[1];
+        rebuild[0] = new Runnable() {
+            @Override public void run() {
+                column.removeAllViews();
+                List<AppInfo> hidden = hiddenApps();
+                if (hidden.isEmpty()) {
+                    TextView empty = m3.text("No hidden apps.\n\nHidden apps are left out of the alphabet and the app "
+                            + "list, but still turn up when you search for them by name.", M3.BODY_LARGE, m3.onSurfaceVariant);
+                    empty.setPadding(dp(24), dp(24), dp(24), dp(24));
+                    column.addView(empty);
+                    return;
+                }
+                column.addView(m3.subheader(hidden.size() + (hidden.size() == 1 ? " hidden app" : " hidden apps")));
+                for (final AppInfo a : hidden) {
+                    TextView unhide = m3.tonalButton("Unhide", 0, new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            setAppHidden(a, false);
+                            Toast.makeText(MainActivity.this, a.label + " is visible again", Toast.LENGTH_SHORT).show();
+                            rebuild[0].run();
+                        }
+                    });
+                    column.addView(m3.listItem(0, a.icon, a.label, null, unhide, null));
+                }
+                TextView note = m3.text("Hidden apps still turn up when you search for them by name.",
+                        M3.BODY_MEDIUM, m3.onSurfaceVariant);
+                note.setPadding(dp(16), dp(16), dp(16), 0);
+                column.addView(note);
+            }
+        };
+        page.action(m3.filledButton("Hide apps", R.drawable.ic_add, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                pickAppsToHide(rebuild[0]);
+            }
+        }));
+        rebuild[0].run();
+        page.show();
+    }
+
+    private void pickAppsToHide(final Runnable after) {
+        final List<AppInfo> apps = new ArrayList<>(visibleApps);
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        for (AppInfo a : apps) items.add(new SearchablePicker.Item(a.label, null, a.icon));
+        SearchablePicker.multi(this, m3, "Hide apps", items, null, 0, "Search apps", "All apps",
                 new SearchablePicker.OnSave() {
                     @Override public void onSave(List<Integer> selectedInOrder) {
-                        Set<String> next = new HashSet<>();
-                        for (int i : selectedInOrder) next.add(apps.get(i).key);
-                        prefs.setHidden(next);
-                        favorites.removeAll(next);
+                        if (selectedInOrder.isEmpty()) return;
+                        Set<String> hidden = prefs.hidden();
+                        for (int i : selectedInOrder) {
+                            hidden.add(apps.get(i).key);
+                            favorites.remove(apps.get(i).key);
+                        }
+                        prefs.setHidden(hidden);
                         prefs.setFavorites(favorites);
                         applyApps();
-                        topCards.render();
                         if (settingsPage != null) buildSettings();
+                        after.run();
                     }
                 });
     }
@@ -1695,13 +1759,15 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         TextView badge;
         AppInfo app;
         String webQuery;
+        Runnable action;
     }
 
     private final View.OnClickListener rowClick = new View.OnClickListener() {
         @Override public void onClick(View v) {
             if (editMode) return;
             Row r = (Row) v.getTag();
-            if (r.app != null) launch(r.app, v);
+            if (r.action != null) r.action.run();
+            else if (r.app != null) launch(r.app, v);
             else if (r.webQuery != null) webSearch(r.webQuery);
         }
     };
@@ -1784,6 +1850,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         Row r = (Row) v.getTag();
         r.app = app;
         r.webQuery = null;
+        r.action = null;
         r.icon.setImageDrawable(app.icon);
         r.icon.setImageTintList(null);
         r.icon.setColorFilter(theme.grayscale ? Theme.grayscaleFilter() : null);
@@ -1798,10 +1865,30 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.preview.setVisibility(preview == null ? View.GONE : View.VISIBLE);
     }
 
+    private void bindHiddenEntryRow(View v, int count) {
+        Row r = (Row) v.getTag();
+        r.app = null;
+        r.webQuery = null;
+        r.action = new Runnable() {
+            @Override public void run() {
+                showHiddenApps();
+            }
+        };
+        r.icon.setImageDrawable(m3.icon(R.drawable.ic_visibility_off, theme.textSecondary));
+        r.icon.setColorFilter(null);
+        r.icon.setImageTintList(null);
+        r.icon.setVisibility(View.VISIBLE);
+        r.label.setText("Hidden apps");
+        r.preview.setText(count + (count == 1 ? " app \u00B7 tap to unhide" : " apps \u00B7 tap to unhide"));
+        r.preview.setVisibility(View.VISIBLE);
+        r.badge.setVisibility(View.GONE);
+    }
+
     private void bindWebRow(View v, String query) {
         Row r = (Row) v.getTag();
         r.app = null;
         r.webQuery = query;
+        r.action = null;
         r.icon.setImageDrawable(getDrawable(android.R.drawable.ic_menu_search));
         r.icon.setColorFilter(null);
         r.icon.setImageTintList(ColorStateList.valueOf(theme.text));
@@ -1818,11 +1905,16 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         private final Map<String, Integer> sectionPositions = new HashMap<>();
         private List<AppInfo> apps = new ArrayList<>();
         private List<AppInfo> favs = new ArrayList<>();
+        private List<AppInfo> hidden = new ArrayList<>();
+        private final Set<String> hiddenKeys = new HashSet<>();
         private String query = "";
 
-        void setApps(List<AppInfo> apps, List<AppInfo> favs) {
+        void setApps(List<AppInfo> apps, List<AppInfo> favs, List<AppInfo> hidden) {
             this.apps = apps;
             this.favs = favs;
+            this.hidden = hidden;
+            hiddenKeys.clear();
+            for (AppInfo a : hidden) hiddenKeys.add(a.key);
             rebuild();
         }
 
@@ -1858,6 +1950,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                     }
                     items.add(a);
                 }
+                // A way back to hidden apps, at the very end of the list.
+                if (!hidden.isEmpty()) items.add(new HiddenEntry(hidden.size()));
             } else {
                 String q = AppInfo.normalize(query);
                 List<AppInfo> prefix = new ArrayList<>();
@@ -1871,6 +1965,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 items.addAll(prefix);
                 items.addAll(wordPrefix);
                 items.addAll(contains);
+                // Hidden apps still turn up when searched for by name, dimmed, under their own header.
+                List<AppInfo> hiddenMatches = new ArrayList<>();
+                for (AppInfo a : hidden) if (a.searchLabel.contains(q)) hiddenMatches.add(a);
+                if (!hiddenMatches.isEmpty()) {
+                    items.add("Hidden");
+                    items.addAll(hiddenMatches);
+                }
                 items.add(new WebSearch(query));
             }
             notifyDataSetChanged();
@@ -1884,7 +1985,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         @Override public int getItemViewType(int position) {
             Object o = items.get(position);
             if (o instanceof String) return 0;
-            if (o instanceof WebSearch) return 2;
+            if (o instanceof WebSearch || o instanceof HiddenEntry) return 2;
             return 1;
         }
 
@@ -1903,9 +2004,25 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 return header;
             }
             View row = convertView != null ? convertView : createRow(STYLE_DRAWER);
-            if (o instanceof WebSearch) bindWebRow(row, ((WebSearch) o).query);
-            else bindRow(row, (AppInfo) o, STYLE_DRAWER);
+            if (o instanceof WebSearch) {
+                bindWebRow(row, ((WebSearch) o).query);
+                row.setAlpha(1f);
+            } else if (o instanceof HiddenEntry) {
+                bindHiddenEntryRow(row, ((HiddenEntry) o).count);
+                row.setAlpha(1f);
+            } else {
+                bindRow(row, (AppInfo) o, STYLE_DRAWER);
+                row.setAlpha(hiddenKeys.contains(((AppInfo) o).key) ? 0.5f : 1f);
+            }
             return row;
+        }
+    }
+
+    private static final class HiddenEntry {
+        final int count;
+
+        HiddenEntry(int count) {
+            this.count = count;
         }
     }
 
