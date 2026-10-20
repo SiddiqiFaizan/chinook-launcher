@@ -779,61 +779,28 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     private void showZonePicker() {
-        final List<String> all = WorldClocks.allZones();
-        final List<String> shown = new ArrayList<>(all);
-        final List<String> labels = new ArrayList<>();
-        for (String z : shown) labels.add(zoneLabel(z));
-        final ArrayAdapter<String> zoneAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels);
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(20), dp(8), dp(20), 0);
-        final EditText filter = new EditText(this);
-        filter.setHint("Search city or region");
-        filter.setSingleLine(true);
-        filter.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        box.addView(filter);
-        ListView zoneList = new ListView(this);
-        zoneList.setAdapter(zoneAdapter);
-        box.addView(zoneList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(380)));
-
-        final AlertDialog dialog = dialog()
-                .setTitle("Add world clock")
-                .setView(box)
-                .setNegativeButton("Cancel", null)
-                .create();
-        filter.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void afterTextChanged(Editable s) {
-                String q = AppInfo.normalize(s.toString().trim());
-                shown.clear();
-                labels.clear();
-                for (String z : all) {
-                    String label = zoneLabel(z);
-                    if (q.isEmpty() || AppInfo.normalize(label).contains(q)) {
-                        shown.add(z);
-                        labels.add(label);
+        final List<String> zones = WorldClocks.allZones();
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        for (String z : zones) {
+            items.add(new SearchablePicker.Item(WorldClocks.city(z),
+                    WorldClocks.region(z) + "  \u00B7  " + WorldClocks.gmtOffset(z), null));
+        }
+        SearchablePicker.single(this, theme, "Add world clock", items, "Search city, region or GMT",
+                new SearchablePicker.OnPick() {
+                    @Override public void onPick(int index) {
+                        addWorldClock(zones.get(index));
                     }
-                }
-                zoneAdapter.notifyDataSetChanged();
-            }
-        });
-        zoneList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                List<String> zones = prefs.worldClocks();
-                String zone = shown.get(position);
-                if (!zones.contains(zone)) zones.add(zone);
-                prefs.setWorldClocks(zones);
-                renderWorldClocks();
-                dialog.dismiss();
-            }
-        });
-        dialog.show();
+                });
     }
 
-    private static String zoneLabel(String zone) {
-        return WorldClocks.city(zone) + ", " + WorldClocks.region(zone) + "  ·  " + WorldClocks.gmtOffset(zone);
+    private void addWorldClock(String zone) {
+        List<String> current = prefs.worldClocks();
+        if (!current.contains(zone)) current.add(zone);
+        prefs.setWorldClocks(current);
+        renderWorldClocks();
+        // World clocks live on the clock card: make sure it exists and bring it into view.
+        topCards.showClockCard();
+        Toast.makeText(this, "Added " + WorldClocks.city(zone), Toast.LENGTH_SHORT).show();
     }
 
     private void updateAlarm() {
@@ -1214,32 +1181,26 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private void showFavoritesPicker() {
         final List<AppInfo> apps = new ArrayList<>(visibleApps);
-        String[] labels = new String[apps.size()];
-        final boolean[] checked = new boolean[apps.size()];
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        List<Integer> initial = new ArrayList<>();
+        Map<String, Integer> indexByKey = new HashMap<>();
         for (int i = 0; i < apps.size(); i++) {
-            labels[i] = apps.get(i).label;
-            checked[i] = favorites.contains(apps.get(i).key);
+            items.add(new SearchablePicker.Item(apps.get(i).label, null, apps.get(i).icon));
+            indexByKey.put(apps.get(i).key, i);
         }
-        dialog()
-                .setTitle("Home apps")
-                .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
-                    @Override public void onClick(DialogInterface d, int which, boolean isChecked) {
-                        checked[which] = isChecked;
-                    }
-                })
-                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        Set<String> selected = new HashSet<>();
-                        for (int i = 0; i < apps.size(); i++) if (checked[i]) selected.add(apps.get(i).key);
+        for (String k : favorites) {
+            Integer i = indexByKey.get(k);
+            if (i != null) initial.add(i);
+        }
+        SearchablePicker.multi(this, theme, "Home apps", items, initial, 0, "Search apps",
+                new SearchablePicker.OnSave() {
+                    @Override public void onSave(List<Integer> selectedInOrder) {
                         List<String> next = new ArrayList<>();
-                        for (String k : favorites) if (selected.contains(k)) next.add(k);
-                        for (AppInfo a : apps) if (selected.contains(a.key) && !next.contains(a.key)) next.add(a.key);
+                        for (int i : selectedInOrder) next.add(apps.get(i).key);
                         favorites = next;
                         saveFavorites();
                     }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+                });
     }
 
     // -------------------------------------------------------- settings
@@ -1332,37 +1293,26 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     private void showHiddenApps() {
-        final Set<String> hidden = prefs.hidden();
-        final List<AppInfo> hiddenApps = new ArrayList<>();
-        for (AppInfo a : rawApps) if (hidden.contains(a.key)) hiddenApps.add(a);
-        if (hiddenApps.isEmpty()) {
-            Toast.makeText(this, "No hidden apps", Toast.LENGTH_SHORT).show();
-            return;
+        final List<AppInfo> apps = new ArrayList<>(rawApps);
+        Set<String> hidden = prefs.hidden();
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        List<Integer> initial = new ArrayList<>();
+        for (int i = 0; i < apps.size(); i++) {
+            items.add(new SearchablePicker.Item(apps.get(i).label, null, apps.get(i).icon));
+            if (hidden.contains(apps.get(i).key)) initial.add(i);
         }
-        String[] labels = new String[hiddenApps.size()];
-        final boolean[] checked = new boolean[hiddenApps.size()];
-        for (int i = 0; i < labels.length; i++) {
-            labels[i] = hiddenApps.get(i).label;
-            checked[i] = true;
-        }
-        dialog()
-                .setTitle("Hidden apps (untick to unhide)")
-                .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
-                    @Override public void onClick(DialogInterface d, int which, boolean isChecked) {
-                        checked[which] = isChecked;
-                    }
-                })
-                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        for (int i = 0; i < checked.length; i++) {
-                            if (!checked[i]) hidden.remove(hiddenApps.get(i).key);
-                        }
-                        prefs.setHidden(hidden);
+        SearchablePicker.multi(this, theme, "Hidden apps (ticked = hidden)", items, initial, 0, "Search apps",
+                new SearchablePicker.OnSave() {
+                    @Override public void onSave(List<Integer> selectedInOrder) {
+                        Set<String> next = new HashSet<>();
+                        for (int i : selectedInOrder) next.add(apps.get(i).key);
+                        prefs.setHidden(next);
+                        favorites.removeAll(next);
+                        prefs.setFavorites(favorites);
                         applyApps();
+                        topCards.render();
                     }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+                });
     }
 
     private void showAbout() {

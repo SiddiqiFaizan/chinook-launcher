@@ -26,6 +26,8 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
   to launch the top hit, or search the web if nothing matches.
 - **Swipe down** for notifications. **Long-press an app** for app shortcuts, add/remove from home,
   hide, app info and uninstall.
+- **Search everywhere**: every picker (home apps, app cards, widgets, world clocks, hidden apps)
+  has a search box; already-chosen items are listed first.
 - Optional notification dots, hidden apps, work-profile support, Manrope or system font.
 
 ## Install
@@ -63,6 +65,7 @@ src/app/chinook/launcher/
   LockScreenDesigner.java    lock-screen wallpaper styles
   WidgetHostView.java        widget view that catches long-press
   WorldClocks.java           time-zone list, names, day offsets
+  SearchablePicker.java      searchable single/multi-select list used by every picker
   Theme.java                 Colored / Dark / Black & White palettes
   Fonts.java                 bundled or system font
   AlphabetScrollerView.java  the A–Z wave strip

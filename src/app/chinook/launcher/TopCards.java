@@ -162,10 +162,40 @@ final class TopCards {
     }
 
     private View clockCard(View clock) {
-        FrameLayout card = new FrameLayout(activity);
+        FitFrame card = new FitFrame(activity);
         card.addView(clock, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
         return card;
+    }
+
+    /**
+     * Holds the clock card's content at its natural height and scales it down if it's taller than
+     * the card (large font sizes, short cards), so the world clocks are never cut off.
+     */
+    private static final class FitFrame extends FrameLayout {
+        FitFrame(android.content.Context context) {
+            super(context);
+        }
+
+        @Override protected void onMeasure(int widthSpec, int heightSpec) {
+            super.onMeasure(widthSpec, heightSpec);
+            View c = getChildAt(0);
+            if (c == null) return;
+            c.measure(MeasureSpec.makeMeasureSpec(getMeasuredWidth(), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+        }
+
+        @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            View c = getChildAt(0);
+            if (c == null) return;
+            c.layout(0, 0, c.getMeasuredWidth(), c.getMeasuredHeight());
+            int avail = b - t;
+            float scale = c.getMeasuredHeight() > avail && avail > 0 ? avail / (float) c.getMeasuredHeight() : 1f;
+            c.setPivotX(0);
+            c.setPivotY(0);
+            c.setScaleX(scale);
+            c.setScaleY(scale);
+        }
     }
 
     private FrameLayout roundedCard() {
@@ -379,41 +409,41 @@ final class TopCards {
 
     private void chooseApps(final int index) {
         if (index < 0) return;
-        final List<AppInfo> apps = host.visibleApps();
-        final Set<String> current = new HashSet<>(appKeys(cards.get(index)));
-        final List<String> order = new ArrayList<>(appKeys(cards.get(index)));
-        String[] labels = new String[apps.size()];
-        final boolean[] checked = new boolean[apps.size()];
+        final List<AppInfo> apps = new ArrayList<>(host.visibleApps());
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        java.util.Map<String, Integer> indexByKey = new java.util.HashMap<>();
         for (int i = 0; i < apps.size(); i++) {
-            labels[i] = apps.get(i).label;
-            checked[i] = current.contains(apps.get(i).key);
+            items.add(new SearchablePicker.Item(apps.get(i).label, null, apps.get(i).icon));
+            indexByKey.put(apps.get(i).key, i);
         }
-        new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("Apps on this card (up to " + MAX_APPS + ")")
-                .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
-                    @Override public void onClick(DialogInterface d, int which, boolean isChecked) {
-                        String key = apps.get(which).key;
-                        if (isChecked && order.size() >= MAX_APPS) {
-                            ((AlertDialog) d).getListView().setItemChecked(which, false);
-                            checked[which] = false;
-                            Toast.makeText(activity, "A card holds up to " + MAX_APPS + " apps", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                        checked[which] = isChecked;
-                        if (isChecked) order.add(key);
-                        else order.remove(key);
-                    }
-                })
-                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        cards.set(index, APPS + TextUtils.join("|", order));
+        List<Integer> initial = new ArrayList<>();
+        for (String k : appKeys(cards.get(index))) {
+            Integer i = indexByKey.get(k);
+            if (i != null) initial.add(i);
+        }
+        SearchablePicker.multi(activity, theme, "Apps on this card", items, initial, MAX_APPS, "Search apps",
+                new SearchablePicker.OnSave() {
+                    @Override public void onSave(List<Integer> selectedInOrder) {
+                        List<String> keys = new ArrayList<>();
+                        for (int i : selectedInOrder) keys.add(apps.get(i).key);
+                        cards.set(index, APPS + TextUtils.join("|", keys));
                         save();
                         render();
                         pager.setCurrent(index);
                     }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+                });
+    }
+
+    /** Scrolls to the clock card, re-adding it first if it was removed. */
+    void showClockCard() {
+        int i = cards.indexOf(CLOCK);
+        if (i < 0) {
+            cards.add(0, CLOCK);
+            save();
+            render();
+            i = 0;
+        }
+        pager.setCurrent(i);
     }
 
     private void showHeight() {

@@ -136,61 +136,24 @@ final class WidgetBinder {
             }
         });
 
-        BaseAdapter adapter = new BaseAdapter() {
-            @Override public int getCount() { return providers.size(); }
-            @Override public Object getItem(int i) { return providers.get(i); }
-            @Override public long getItemId(int i) { return i; }
-
-            @Override public View getView(int i, View convert, ViewGroup parent) {
-                LinearLayout row = (LinearLayout) convert;
-                if (row == null) {
-                    row = new LinearLayout(activity);
-                    row.setGravity(Gravity.CENTER_VERTICAL);
-                    row.setPadding(dp(20), dp(10), dp(20), dp(10));
-                    ImageView icon = new ImageView(activity);
-                    LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(40), dp(40));
-                    ip.rightMargin = dp(16);
-                    row.addView(icon, ip);
-                    LinearLayout texts = new LinearLayout(activity);
-                    texts.setOrientation(LinearLayout.VERTICAL);
-                    TextView title = new TextView(activity);
-                    title.setTextColor(Color.WHITE);
-                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                    title.setTypeface(Fonts.medium);
-                    TextView sub = new TextView(activity);
-                    sub.setTextColor(0x99FFFFFF);
-                    sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                    sub.setTypeface(Fonts.regular);
-                    texts.addView(title);
-                    texts.addView(sub);
-                    row.addView(texts);
-                }
-                AppWidgetProviderInfo p = providers.get(i);
-                ImageView icon = (ImageView) row.getChildAt(0);
-                LinearLayout texts = (LinearLayout) row.getChildAt(1);
-                Drawable d = null;
-                try {
-                    d = p.loadIcon(activity, activity.getResources().getDisplayMetrics().densityDpi);
-                } catch (RuntimeException ignored) {
-                }
-                icon.setImageDrawable(d);
-                icon.setColorFilter(theme.grayscale ? Theme.grayscaleFilter() : null);
-                ((TextView) texts.getChildAt(0)).setText(labels.get(p));
-                String size = Math.round(p.minWidth / density) + " × " + Math.round(p.minHeight / density) + " dp";
-                ((TextView) texts.getChildAt(1)).setText(appLabels.get(p.provider.getPackageName()) + "  ·  " + size);
-                return row;
-            }
-        };
-
-        new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("Add widget")
-                .setAdapter(adapter, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        bind(providers.get(which), callback);
+        List<SearchablePicker.Item> items = new ArrayList<>();
+        final int dpi = activity.getResources().getDisplayMetrics().densityDpi;
+        for (final AppWidgetProviderInfo p : providers) {
+            String size = Math.round(p.minWidth / density) + " \u00D7 " + Math.round(p.minHeight / density) + " dp";
+            items.add(new SearchablePicker.Item(labels.get(p),
+                    appLabels.get(p.provider.getPackageName()) + "  \u00B7  " + size,
+                    new SearchablePicker.IconSource() {
+                        @Override public Drawable load() {
+                            return p.loadIcon(activity, dpi);
+                        }
+                    }, null));
+        }
+        SearchablePicker.single(activity, theme, "Add widget", items, "Search widgets or apps",
+                new SearchablePicker.OnPick() {
+                    @Override public void onPick(int index) {
+                        bind(providers.get(index), callback);
                     }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+                });
     }
 
     private void bind(AppWidgetProviderInfo info, Callback callback) {
