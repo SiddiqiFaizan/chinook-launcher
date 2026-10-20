@@ -7,6 +7,7 @@ import android.app.SearchManager;
 import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -91,6 +92,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private LinearLayout settingsColumn;
     /** Set before recreate() (theme/font change) so Settings reopens where the user was. */
     private static boolean reopenSettings;
+    /** True while the user is off in system settings granting notification access. */
+    private boolean awaitingNotificationAccess;
     private AppRepository repo;
     private WidgetBinder widgetBinder;
     private TopCards topCards;
@@ -227,6 +230,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     @Override protected void onResume() {
         super.onResume();
+        if (awaitingNotificationAccess) onReturnFromNotificationSettings();
         refreshDots();
         // Values like notification access or default launcher may have changed in system settings.
         if (settingsPage != null) buildSettings();
@@ -1262,6 +1266,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         showThemePicker();
                     }
                 })
+                .item(R.drawable.ic_notifications, "Notification badges",
+                        NotificationDotService.isEnabled(this) ? "On" : "Off \u00B7 tap to set up", new Runnable() {
+                    @Override public void run() {
+                        if (NotificationDotService.isEnabled(MainActivity.this)) openNotificationAccessSettings();
+                        else showNotificationAccessSheet();
+                    }
+                })
                 .item(R.drawable.ic_visibility_off, "Hidden apps", hiddenSummary(), new Runnable() {
                     @Override public void run() {
                         showHiddenApps();
@@ -1417,28 +1428,93 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (settingsPage != null) buildSettings();
     }
 
+    /**
+     * Step-by-step guide to notification access. It's a special access (not a runtime permission),
+     * so it never appears under App info → Permissions, and on Android 13+ apps installed from an APK
+     * must first be allowed "restricted settings". The guide reopens on return until access is on.
+     */
     private void showNotificationAccessSheet() {
-        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, "Show notifications on your apps");
-        TextView body = m3.text("Allow notification access so Chinook can show unread counts on every app and the "
-                        + "newest message under your home screen apps. Nothing leaves your phone.",
-                M3.BODY_MEDIUM, m3.onSurfaceVariant);
-        body.setPadding(dp(24), 0, dp(24), dp(8));
-        sheet.add(body);
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, "Turn on notification badges");
+        TextView intro = m3.text("Chinook needs notification access to show unread counts on your apps and the newest "
+                + "message under home screen apps. Nothing leaves your phone.", M3.BODY_MEDIUM, m3.onSurfaceVariant);
+        intro.setPadding(dp(24), 0, dp(24), dp(8));
+        sheet.add(intro);
+
+        int step = 1;
+        if (Build.VERSION.SDK_INT >= 33) {
+            sheet.add(m3.listItem(R.drawable.ic_lock, null, step++ + ". Allow restricted settings",
+                    "Needed if Android shows \u201CRestricted setting\u201D. In App info, tap \u22EE in the top corner, "
+                            + "then \u201CAllow restricted settings\u201D.",
+                    m3.tonalButton("App info", 0, new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            sheet.dismissThen(new Runnable() {
+                                @Override public void run() {
+                                    awaitingNotificationAccess = true;
+                                    safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.fromParts("package", getPackageName(), null)));
+                                }
+                            });
+                        }
+                    }), null));
+        }
+        sheet.add(m3.listItem(R.drawable.ic_notifications, null, step + ". Turn on notification access",
+                "Switch on Chinook, confirm, then come back here.",
+                m3.filledButton("Open", 0, new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        sheet.dismissThen(new Runnable() {
+                            @Override public void run() {
+                                openNotificationAccessSettings();
+                            }
+                        });
+                    }
+                }), null));
+
+        TextView note = m3.text("This is a special access, so App info \u2192 Permissions will still say "
+                + "\u201CNo permissions requested\u201D. That's normal. Check it in Settings \u2192 Apps \u2192 "
+                + "Special app access \u2192 Notification access.", M3.BODY_MEDIUM, m3.onSurfaceVariant);
+        note.setPadding(dp(24), dp(12), dp(24), dp(4));
+        sheet.add(note);
+
         sheet.action(m3.textButton("Not now", new View.OnClickListener() {
             @Override public void onClick(View v) {
+                awaitingNotificationAccess = false;
                 sheet.dismiss();
             }
         }));
-        sheet.action(m3.filledButton("Allow", 0, new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                sheet.dismissThen(new Runnable() {
-                    @Override public void run() {
-                        safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
-                    }
-                });
-            }
-        }));
         sheet.show();
+    }
+
+    /** Opens Chinook's own notification-access switch (Android 11+), or the full list. */
+    private void openNotificationAccessSettings() {
+        awaitingNotificationAccess = true;
+        String component = new ComponentName(this, NotificationDotService.class).flattenToString();
+        if (Build.VERSION.SDK_INT >= 30) {
+            Intent detail = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS);
+            detail.putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, component);
+            if (safeStart(detail)) return;
+        }
+        safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+    }
+
+    private void onReturnFromNotificationSettings() {
+        awaitingNotificationAccess = false;
+        if (NotificationDotService.isEnabled(this)) {
+            // Make sure the listener connects now rather than at the next reboot.
+            try {
+                android.service.notification.NotificationListenerService.requestRebind(
+                        new ComponentName(this, NotificationDotService.class));
+            } catch (RuntimeException ignored) {
+            }
+            Toast.makeText(this, "Notification badges are on", Toast.LENGTH_SHORT).show();
+            if (settingsPage != null) buildSettings();
+        } else {
+            // Not on yet (e.g. after allowing restricted settings): show the next step again.
+            root.postDelayed(new Runnable() {
+                @Override public void run() {
+                    showNotificationAccessSheet();
+                }
+            }, 350);
+        }
     }
 
     private interface Toggle {
@@ -1570,12 +1646,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         renderFavorites();
                     }
                 }));
+        final boolean badgesOn = NotificationDotService.isEnabled(this);
         c.addView(m3.listItem(R.drawable.ic_notifications, null, "Notification badges",
-                NotificationDotService.isEnabled(this) ? "On \u00B7 counts show on every app"
-                        : "Off \u00B7 tap to allow notification access", null,
+                badgesOn ? "On \u00B7 counts show on every app" : "Off \u00B7 tap to set up", null,
                 run(new Runnable() {
                     @Override public void run() {
-                        safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+                        if (badgesOn) openNotificationAccessSettings();
+                        else showNotificationAccessSheet();
                     }
                 })));
 

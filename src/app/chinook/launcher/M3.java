@@ -299,7 +299,7 @@ final class M3 {
         texts.addView(h);
         if (twoLine) {
             TextView s = text(supporting, BODY_MEDIUM, onSurfaceVariant);
-            s.setMaxLines(2);
+            s.setMaxLines(4);
             s.setEllipsize(TextUtils.TruncateAt.END);
             s.setPadding(0, dp(2), 0, 0);
             texts.addView(s);
