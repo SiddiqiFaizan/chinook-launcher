@@ -1,4 +1,4 @@
-package app.cascade.launcher;
+package app.chinook.launcher;
 
 import android.app.Activity;
 import android.app.AlarmManager;
@@ -1097,7 +1097,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             RoleManager rm = getSystemService(RoleManager.class);
             if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) {
                 if (rm.isRoleHeld(RoleManager.ROLE_HOME)) {
-                    Toast.makeText(this, "Cascade is already your launcher", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Chinook is already your launcher", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 try {
@@ -1300,7 +1300,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 "Notification dots: " + (dots ? "on" : "off"),
                 "Hidden apps",
                 "Set as default launcher",
-                "About Cascade",
+                "About Chinook",
         };
         dialog()
                 .setTitle("Settings")
@@ -1367,7 +1367,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private void showAbout() {
         dialog()
-                .setTitle("Cascade Launcher")
+                .setTitle("Chinook Launcher")
                 .setMessage("A minimal, open-source launcher.\n\n"
                         + "• Slide along the letters, then onto an app and let go to open it\n"
                         + "• Swipe up to search, swipe down for notifications\n"

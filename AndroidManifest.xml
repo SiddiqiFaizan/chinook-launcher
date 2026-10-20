@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="app.cascade.launcher"
+    package="app.chinook.launcher"
     android:versionCode="3"
     android:versionName="3.0">
 
@@ -15,7 +15,7 @@
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.Cascade"
+        android:theme="@style/Theme.Chinook"
         android:allowBackup="true">
 
         <activity

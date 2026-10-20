@@ -1,4 +1,4 @@
-package app.cascade.launcher;
+package app.chinook.launcher;
 
 import android.app.Activity;
 import android.app.AlertDialog;

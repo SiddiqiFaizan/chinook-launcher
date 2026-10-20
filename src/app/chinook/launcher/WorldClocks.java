@@ -1,4 +1,4 @@
-package app.cascade.launcher;
+package app.chinook.launcher;
 
 import java.util.ArrayList;
 import java.util.Calendar;

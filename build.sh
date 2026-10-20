@@ -8,8 +8,8 @@ cd "$(dirname "$0")"
 ANDROID_JAR=${ANDROID_JAR:-sdk/android.jar}
 DX=$(command -v dalvik-exchange || command -v dx)
 OUT=build
-APK=CascadeLauncher.apk
-KEYSTORE=keystore/cascade.jks
+APK=ChinookLauncher.apk
+KEYSTORE=keystore/chinook.jks
 
 if [ ! -f "$ANDROID_JAR" ]; then
   mkdir -p sdk
@@ -35,10 +35,10 @@ echo "==> Aligning & signing"
 zipalign -f -p 4 "$OUT/app.unaligned.apk" "$OUT/app.aligned.apk"
 if [ ! -f "$KEYSTORE" ]; then
   mkdir -p keystore
-  keytool -genkeypair -keystore "$KEYSTORE" -alias cascade -keyalg RSA -keysize 2048 -validity 10000 \
-    -storepass android -keypass android -dname "CN=Cascade Launcher" >/dev/null 2>&1
+  keytool -genkeypair -keystore "$KEYSTORE" -alias chinook -keyalg RSA -keysize 2048 -validity 10000 \
+    -storepass android -keypass android -dname "CN=Chinook Launcher" >/dev/null 2>&1
 fi
-apksigner sign --ks "$KEYSTORE" --ks-key-alias cascade --ks-pass pass:android --key-pass pass:android \
+apksigner sign --ks "$KEYSTORE" --ks-key-alias chinook --ks-pass pass:android --key-pass pass:android \
   --out "$APK" "$OUT/app.aligned.apk"
 apksigner verify --print-certs "$APK" | head -1
 echo "==> Built $APK ($(du -h "$APK" | cut -f1))"

@@ -1,4 +1,4 @@
-package app.cascade.launcher;
+package app.chinook.launcher;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -28,7 +28,7 @@ final class Prefs {
     private final SharedPreferences sp;
 
     Prefs(Context context) {
-        sp = context.getSharedPreferences("cascade", Context.MODE_PRIVATE);
+        sp = context.getSharedPreferences("chinook", Context.MODE_PRIVATE);
     }
 
     boolean hasFavorites() {

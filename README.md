@@ -1,4 +1,4 @@
-# Cascade Launcher
+# Chinook Launcher
 
 A minimal, open-source Android home-screen launcher inspired by the *one-handed, list-based*
 style of launchers like Niagara. Written from scratch in plain Java with only Android framework
@@ -30,9 +30,9 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
 
 ## Install
 
-1. Copy `CascadeLauncher.apk` to your phone and open it (allow "install unknown apps" for your
+1. Copy `ChinookLauncher.apk` to your phone and open it (allow "install unknown apps" for your
    file manager or browser).
-2. Open Cascade. It asks to become your home app. You can also go to
+2. Open Chinook. It asks to become your home app. You can also go to
    Settings → Apps → Default apps → Home app.
 
 ## Build
@@ -55,7 +55,7 @@ signed with the same key.
 AndroidManifest.xml
 res/                         theme, colours, adaptive icon
 assets/fonts/                Manrope (SIL Open Font License)
-src/app/cascade/launcher/
+src/app/chinook/launcher/
   MainActivity.java          home screen, letter pop-out, drawer, edit mode, menus, settings
   TopCards.java              top card slider: clock, widget and app cards; add/move/remove
   CardPager.java             endless horizontal pager

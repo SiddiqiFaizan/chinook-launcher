@@ -1,4 +1,4 @@
-package app.cascade.launcher;
+package app.chinook.launcher;
 
 import android.content.ComponentName;
 import android.graphics.drawable.Drawable;
