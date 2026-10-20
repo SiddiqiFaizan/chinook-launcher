@@ -26,6 +26,9 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
   to launch the top hit, or search the web if nothing matches.
 - **Swipe down** for notifications. **Long-press an app** for app shortcuts, add/remove from home,
   hide, app info and uninstall.
+- **Android-native menus**: Material 3 bottom sheets with drag handles, an Android-Settings-style
+  settings page with switches and section headers, full-screen search pickers, radio-button theme
+  and font choosers, and Material You colours on Android 12+.
 - **Search everywhere**: every picker (home apps, app cards, widgets, world clocks, hidden apps)
   has a search box; already-chosen items are listed first.
 - Optional notification dots, hidden apps, work-profile support, Manrope or system font.
@@ -55,7 +58,7 @@ signed with the same key.
 
 ```
 AndroidManifest.xml
-res/                         theme, colours, adaptive icon
+res/                         theme, colours, adaptive icon, Material icons (Apache 2.0)
 assets/fonts/                Manrope (SIL Open Font License)
 src/app/chinook/launcher/
   MainActivity.java          home screen, letter pop-out, drawer, edit mode, menus, settings
@@ -65,7 +68,9 @@ src/app/chinook/launcher/
   LockScreenDesigner.java    lock-screen wallpaper styles
   WidgetHostView.java        widget view that catches long-press
   WorldClocks.java           time-zone list, names, day offsets
-  SearchablePicker.java      searchable single/multi-select list used by every picker
+  SearchablePicker.java      full-screen searchable single/multi-select picker
+  M3.java                    Material 3 colour roles, type scale, buttons, list items, controls
+  Surfaces.java              bottom sheet and full-screen page containers
   Theme.java                 Colored / Dark / Black & White palettes
   Fonts.java                 bundled or system font
   AlphabetScrollerView.java  the A–Z wave strip

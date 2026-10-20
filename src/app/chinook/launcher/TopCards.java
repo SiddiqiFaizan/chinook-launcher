@@ -49,6 +49,7 @@ final class TopCards {
     private final Activity activity;
     private final Prefs prefs;
     private final Theme theme;
+    private final M3 m;
     private final Host host;
     private final WidgetBinder binder;
     private final CardPager pager;
@@ -56,11 +57,12 @@ final class TopCards {
     private final float density;
     private final List<String> cards;
 
-    TopCards(Activity activity, Prefs prefs, Theme theme, Host host, WidgetBinder binder,
+    TopCards(Activity activity, Prefs prefs, M3 m, Host host, WidgetBinder binder,
              CardPager pager, LinearLayout dots) {
         this.activity = activity;
         this.prefs = prefs;
-        this.theme = theme;
+        this.m = m;
+        this.theme = m.theme;
         this.host = host;
         this.binder = binder;
         this.pager = pager;
@@ -359,7 +361,7 @@ final class TopCards {
                         showAddCard();
                         break;
                     case 5:
-                        showHeight();
+                        showHeight(null);
                         break;
                     case 6:
                         if (card.startsWith(WIDGET)) binder.delete(parseId(card));
@@ -375,28 +377,30 @@ final class TopCards {
     }
 
     void showAddCard() {
-        final boolean hasClock = cards.contains(CLOCK);
-        List<String> items = new ArrayList<>(Arrays.asList("Widget (weather, calendar, wallet…)", "App shortcuts"));
-        if (!hasClock) items.add("Clock");
-        new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("Add a top card")
-                .setItems(items.toArray(new String[0]), new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        if (which == 0) {
-                            binder.pick(new WidgetBinder.Callback() {
-                                @Override public void onWidgetReady(int appWidgetId) {
-                                    insertCard(WIDGET + appWidgetId);
-                                }
-                            });
-                        } else if (which == 1) {
-                            insertCard(APPS);
-                            chooseApps(cards.indexOf(APPS));
-                        } else {
-                            insertCard(CLOCK);
-                        }
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, "Add a top card");
+        sheet.item(R.drawable.ic_widgets, "Widget", "Weather, calendar, wallet, music and more", new Runnable() {
+            @Override public void run() {
+                binder.pick(new WidgetBinder.Callback() {
+                    @Override public void onWidgetReady(int appWidgetId) {
+                        insertCard(WIDGET + appWidgetId);
                     }
-                })
-                .show();
+                });
+            }
+        });
+        sheet.item(R.drawable.ic_apps, "App shortcuts", "Up to " + MAX_APPS + " apps on one card", new Runnable() {
+            @Override public void run() {
+                insertCard(APPS);
+                chooseApps(cards.indexOf(APPS));
+            }
+        });
+        if (!cards.contains(CLOCK)) {
+            sheet.item(R.drawable.ic_schedule, "Clock", "Time, date, next alarm and world clocks", new Runnable() {
+                @Override public void run() {
+                    insertCard(CLOCK);
+                }
+            });
+        }
+        sheet.show();
     }
 
     private void insertCard(String card) {
@@ -421,7 +425,7 @@ final class TopCards {
             Integer i = indexByKey.get(k);
             if (i != null) initial.add(i);
         }
-        SearchablePicker.multi(activity, theme, "Apps on this card", items, initial, MAX_APPS, "Search apps",
+        SearchablePicker.multi(activity, m, "Apps on this card", items, initial, MAX_APPS, "Search apps", "All apps",
                 new SearchablePicker.OnSave() {
                     @Override public void onSave(List<Integer> selectedInOrder) {
                         List<String> keys = new ArrayList<>();
@@ -446,52 +450,58 @@ final class TopCards {
         pager.setCurrent(i);
     }
 
-    private void showHeight() {
+    void showHeight(final Runnable after) {
         final int original = prefs.cardHeightDp();
-        final TextView label = new TextView(activity);
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        label.setText("Height: " + original + " dp");
-        final SeekBar seek = new SeekBar(activity);
+        final int[] chosen = {original};
+        // A light scrim keeps the cards visible while resizing.
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(activity, m, "Top card height", 0.08f);
+        final TextView value = m.text(original + " dp", M3.TITLE_MEDIUM, m.onSurface);
+        value.setPadding(m.dp(24), 0, m.dp(24), m.dp(4));
+        sheet.add(value);
+        TextView hint = m.text("Drag to resize every card in the top slider.", M3.BODY_MEDIUM, m.onSurfaceVariant);
+        hint.setPadding(m.dp(24), 0, m.dp(24), m.dp(8));
+        sheet.add(hint);
+        SeekBar seek = new SeekBar(activity);
+        m.tint(seek);
         seek.setMax(MAX_HEIGHT_DP - MIN_HEIGHT_DP);
         seek.setProgress(original - MIN_HEIGHT_DP);
+        seek.setPadding(m.dp(24), m.dp(12), m.dp(24), m.dp(12));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
-                int h = MIN_HEIGHT_DP + progress;
-                label.setText("Height: " + h + " dp");
-                ViewGroup.LayoutParams lp = pager.getLayoutParams();
-                lp.height = dp(h);
-                pager.setLayoutParams(lp);
+                chosen[0] = MIN_HEIGHT_DP + progress;
+                value.setText(chosen[0] + " dp");
+                setPagerHeight(chosen[0]);
             }
             @Override public void onStartTrackingTouch(SeekBar s) {}
             @Override public void onStopTrackingTouch(SeekBar s) {}
         });
-        LinearLayout box = new LinearLayout(activity);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(24), dp(16), dp(24), 0);
-        box.addView(label);
-        box.addView(seek);
-        AlertDialog dialog = new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("Top card height")
-                .setView(box)
-                .setPositiveButton("Done", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        prefs.setCardHeightDp(MIN_HEIGHT_DP + seek.getProgress());
-                    }
-                })
-                .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        ViewGroup.LayoutParams lp = pager.getLayoutParams();
-                        lp.height = dp(original);
-                        pager.setLayoutParams(lp);
-                    }
-                })
-                .create();
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setDimAmount(0.1f);
-            dialog.getWindow().setGravity(Gravity.BOTTOM);
-        }
-        dialog.show();
+        sheet.add(seek);
+        final boolean[] saved = {false};
+        sheet.action(m.textButton("Cancel", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sheet.dismiss();
+            }
+        }));
+        sheet.action(m.filledButton("Done", 0, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                saved[0] = true;
+                prefs.setCardHeightDp(chosen[0]);
+                sheet.dismiss();
+            }
+        }));
+        sheet.onDismiss(new Runnable() {
+            @Override public void run() {
+                if (!saved[0]) setPagerHeight(original);
+                if (after != null) after.run();
+            }
+        });
+        sheet.show();
+    }
+
+    private void setPagerHeight(int heightDp) {
+        ViewGroup.LayoutParams lp = pager.getLayoutParams();
+        lp.height = dp(heightDp);
+        pager.setLayoutParams(lp);
     }
 
     // ----------------------------------------------------------- helpers

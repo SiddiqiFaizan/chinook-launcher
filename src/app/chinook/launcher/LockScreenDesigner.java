@@ -66,13 +66,19 @@ final class LockScreenDesigner {
     private final Activity activity;
     private final Prefs prefs;
     private final Theme theme;
+    private final M3 m;
     private final float density;
     private int selected;
+    private ImageView preview;
+    private int screenW;
+    private int screenH;
+    private EditText note;
 
-    LockScreenDesigner(Activity activity, Prefs prefs, Theme theme) {
+    LockScreenDesigner(Activity activity, Prefs prefs, M3 m) {
         this.activity = activity;
         this.prefs = prefs;
-        this.theme = theme;
+        this.m = m;
+        this.theme = m.theme;
         this.density = activity.getResources().getDisplayMetrics().density;
     }
 
@@ -85,17 +91,31 @@ final class LockScreenDesigner {
 
         DisplayMetrics dm = new DisplayMetrics();
         ((WindowManager) activity.getSystemService(Activity.WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
-        final int screenW = dm.widthPixels;
-        final int screenH = dm.heightPixels;
-        int thumbW = dp(92);
+        screenW = dm.widthPixels;
+        screenH = dm.heightPixels;
+
+        final Surfaces.Page page = new Surfaces.Page(activity, m, "Lock screen");
+        LinearLayout column = page.scrollingBody();
+
+        // Large preview of the selected design.
+        int previewH = Math.round(screenH * 0.42f);
+        int previewW = Math.round(previewH * (float) screenW / screenH);
+        preview = new ImageView(activity);
+        preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        preview.setBackground(m.shape(m.surfaceContainerHighest, 24));
+        preview.setClipToOutline(true);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(previewW, previewH);
+        plp.gravity = Gravity.CENTER_HORIZONTAL;
+        plp.topMargin = dp(8);
+        column.addView(preview, plp);
+
+        column.addView(m.subheader("Designs"));
+        int thumbW = dp(72);
         int thumbH = Math.round(thumbW * (float) screenH / screenW);
-
-        LinearLayout box = new LinearLayout(activity);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(16), dp(8), dp(16), 0);
-
         HorizontalScrollView scroll = new HorizontalScrollView(activity);
         scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(dp(12), 0, dp(12), 0);
         LinearLayout strip = new LinearLayout(activity);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         scroll.addView(strip);
@@ -104,70 +124,81 @@ final class LockScreenDesigner {
             LinearLayout item = new LinearLayout(activity);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER_HORIZONTAL);
-            item.setPadding(dp(5), dp(5), dp(5), dp(5));
+            item.setPadding(dp(4), dp(4), dp(4), dp(4));
             ImageView img = new ImageView(activity);
             img.setImageBitmap(render(styleIndex, thumbW, thumbH, "", true));
             img.setPadding(dp(3), dp(3), dp(3), dp(3));
             img.setClipToOutline(true);
             frames.add(img);
             item.addView(img, new LinearLayout.LayoutParams(thumbW + dp(6), thumbH + dp(6)));
-            TextView label = new TextView(activity);
-            label.setText(STYLES[styleIndex].name);
-            label.setTextColor(Color.WHITE);
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            label.setTypeface(Fonts.medium);
+            TextView label = m.text(STYLES[styleIndex].name, M3.LABEL_MEDIUM, m.onSurface);
             label.setPadding(0, dp(6), 0, 0);
             item.addView(label);
-            TextView group = new TextView(activity);
-            group.setText(Theme.NAMES[STYLES[styleIndex].group]);
-            group.setTextColor(0x88FFFFFF);
-            group.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-            item.addView(group);
+            item.addView(m.text(Theme.NAMES[STYLES[styleIndex].group], M3.LABEL_MEDIUM, m.onSurfaceVariant));
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     selected = styleIndex;
                     highlight(frames, order);
+                    updatePreview();
                 }
             });
             strip.addView(item);
         }
-        box.addView(scroll);
+        column.addView(scroll);
         highlight(frames, order);
 
-        final EditText note = new EditText(activity);
-        note.setHint("Optional note, e.g. your name or a contact number");
+        column.addView(m.subheader("Note"));
+        note = new EditText(activity);
+        note.setHint("e.g. your name or an emergency contact");
         note.setText(prefs.lockNote());
-        note.setSingleLine(true);
         note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        noteLp.topMargin = dp(12);
-        box.addView(note, noteLp);
+        note.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                updatePreview();
+            }
+        });
+        LinearLayout field = m.outlinedField(note, "Shown near the bottom of the lock screen (optional)");
+        field.setPadding(dp(16), 0, dp(16), 0);
+        column.addView(field);
 
-        TextView info = new TextView(activity);
-        info.setText("Android draws the lock-screen clock and shortcuts itself. Change the clock style in "
-                + "your phone's Settings → Wallpaper & style.");
-        info.setTextColor(0x88FFFFFF);
-        info.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        info.setPadding(dp(4), dp(8), dp(4), 0);
-        box.addView(info);
+        TextView info = m.text("Android draws the lock-screen clock and shortcuts itself. Change the clock style in "
+                + "your phone's Settings → Wallpaper & style.", M3.BODY_MEDIUM, m.onSurfaceVariant);
+        info.setPadding(dp(16), dp(16), dp(16), dp(8));
+        column.addView(info);
 
-        new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("Lock screen")
-                .setView(box)
-                .setPositiveButton("Lock screen", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        apply(note.getText().toString().trim(), screenW, screenH, WallpaperManager.FLAG_LOCK);
-                    }
-                })
-                .setNeutralButton("Both", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        apply(note.getText().toString().trim(), screenW, screenH,
-                                WallpaperManager.FLAG_LOCK | WallpaperManager.FLAG_SYSTEM);
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        LinearLayout actions = new LinearLayout(activity);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END);
+        actions.setPadding(dp(16), dp(12), dp(16), dp(16));
+        actions.addView(m.tonalButton("Lock screen", R.drawable.ic_lock, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                apply(note.getText().toString().trim(), screenW, screenH, WallpaperManager.FLAG_LOCK);
+                page.close();
+            }
+        }));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        blp.leftMargin = dp(8);
+        actions.addView(m.filledButton("Lock & home", R.drawable.ic_check, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                apply(note.getText().toString().trim(), screenW, screenH,
+                        WallpaperManager.FLAG_LOCK | WallpaperManager.FLAG_SYSTEM);
+                page.close();
+            }
+        }), blp);
+        page.body.addView(actions);
+
+        updatePreview();
+        page.show();
+    }
+
+    private void updatePreview() {
+        int h = Math.round(screenH * 0.42f);
+        int w = Math.round(h * (float) screenW / screenH);
+        String text = note == null ? prefs.lockNote() : note.getText().toString().trim();
+        preview.setImageBitmap(render(selected, w, h, text, true));
     }
 
     private void highlight(List<View> frames, List<Integer> order) {
@@ -175,7 +206,7 @@ final class LockScreenDesigner {
             GradientDrawable g = new GradientDrawable();
             g.setCornerRadius(dp(12));
             g.setColor(Color.TRANSPARENT);
-            if (order.get(i) == selected) g.setStroke(dp(2), theme.accent);
+            if (order.get(i) == selected) g.setStroke(dp(3), m.primary);
             frames.get(i).setBackground(g);
         }
     }

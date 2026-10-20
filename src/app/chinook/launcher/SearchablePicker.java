@@ -1,24 +1,15 @@
 package app.chinook.launcher;
 
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.DialogInterface;
-import android.graphics.Color;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
-import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.view.inputmethod.EditorInfo;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
-import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -32,7 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * A dialog list with a search box, used for every "choose something to add" flow: apps, widgets,
+ * Full-screen Material search page used for every "choose something to add" flow: apps, widgets,
  * cities. Single mode returns one pick; multi mode returns the selection in the order it was made.
  */
 final class SearchablePicker {
@@ -86,111 +77,120 @@ final class SearchablePicker {
     }
 
     private final Activity activity;
-    private final Theme theme;
+    private final M3 m;
     private final String title;
     private final List<Item> items;
     private final String hint;
+    private final String allLabel;
     private final boolean multi;
     private final int max;
     private final OnPick onPick;
     private final OnSave onSave;
-    private final float density;
 
     private final LinkedHashSet<Integer> selected = new LinkedHashSet<>();
-    private final List<Integer> baseOrder = new ArrayList<>();
-    private final List<Integer> visible = new ArrayList<>();
+    private final List<Integer> initiallySelected = new ArrayList<>();
+    private final List<Integer> rest = new ArrayList<>();
+    /** Rows: a String is a subheader, an Integer is an item index. */
+    private final List<Object> rows = new ArrayList<>();
     private BaseAdapter adapter;
-    private AlertDialog dialog;
+    private Surfaces.Page page;
+    private TextView saveButton;
 
-    private SearchablePicker(Activity activity, Theme theme, String title, List<Item> items, String hint,
+    private SearchablePicker(Activity activity, M3 m, String title, List<Item> items, String hint, String allLabel,
                              boolean multi, List<Integer> initial, int max, OnPick onPick, OnSave onSave) {
         this.activity = activity;
-        this.theme = theme;
+        this.m = m;
         this.title = title;
         this.items = items;
         this.hint = hint;
+        this.allLabel = allLabel;
         this.multi = multi;
         this.max = max;
         this.onPick = onPick;
         this.onSave = onSave;
-        this.density = activity.getResources().getDisplayMetrics().density;
-        if (initial != null) selected.addAll(initial);
-        // In multi mode, what's already chosen is listed first so it's easy to review.
-        if (multi) baseOrder.addAll(selected);
-        for (int i = 0; i < items.size(); i++) if (!multi || !selected.contains(i)) baseOrder.add(i);
+        if (initial != null) {
+            selected.addAll(initial);
+            initiallySelected.addAll(selected);
+        }
+        for (int i = 0; i < items.size(); i++) if (!selected.contains(i)) rest.add(i);
     }
 
-    static void single(Activity activity, Theme theme, String title, List<Item> items, String hint, OnPick onPick) {
-        new SearchablePicker(activity, theme, title, items, hint, false, null, 0, onPick, null).show();
+    static void single(Activity activity, M3 m, String title, List<Item> items, String hint, OnPick onPick) {
+        new SearchablePicker(activity, m, title, items, hint, null, false, null, 0, onPick, null).show();
     }
 
-    /** max <= 0 means unlimited. */
-    static void multi(Activity activity, Theme theme, String title, List<Item> items, List<Integer> initial,
-                      int max, String hint, OnSave onSave) {
-        new SearchablePicker(activity, theme, title, items, hint, true, initial, max, null, onSave).show();
+    /** max <= 0 means unlimited. allLabel names the unselected section, e.g. "All apps". */
+    static void multi(Activity activity, M3 m, String title, List<Item> items, List<Integer> initial,
+                      int max, String hint, String allLabel, OnSave onSave) {
+        new SearchablePicker(activity, m, title, items, hint, allLabel, true, initial, max, null, onSave).show();
     }
 
     private void show() {
-        LinearLayout box = new LinearLayout(activity);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(16), dp(8), dp(16), 0);
+        page = new Surfaces.Page(activity, m, title);
+        if (multi) {
+            saveButton = m.filledButton("Save", 0, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    page.close();
+                    onSave.onSave(new ArrayList<>(selected));
+                }
+            });
+            page.action(saveButton);
+        }
 
-        final EditText search = new EditText(activity);
-        search.setHint(hint);
-        search.setTextColor(Color.WHITE);
-        search.setHintTextColor(0x99FFFFFF);
-        search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        search.setTypeface(Fonts.regular);
-        search.setSingleLine(true);
-        search.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        search.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0x1FFFFFFF);
-        bg.setCornerRadius(dp(24));
-        search.setBackground(bg);
-        search.setPadding(dp(18), dp(11), dp(18), dp(11));
-        box.addView(search, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        EditText search = new EditText(activity);
+        LinearLayout bar = m.searchBar(search, hint);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        barLp.leftMargin = barLp.rightMargin = m.dp(16);
+        barLp.topMargin = m.dp(4);
+        barLp.bottomMargin = m.dp(8);
+        page.body.addView(bar, barLp);
 
-        ListView list = new ListView(activity);
+        if (multi && max > 0) {
+            TextView note = m.text("Choose up to " + max, M3.BODY_MEDIUM, m.onSurfaceVariant);
+            note.setPadding(m.dp(32), 0, m.dp(16), m.dp(4));
+            page.body.addView(note);
+        }
+
+        final ListView list = new ListView(activity);
         list.setDivider(null);
-        list.setFastScrollEnabled(false);
-        adapter = new PickerAdapter();
+        list.setSelector(new android.graphics.drawable.ColorDrawable(0));
+        list.setClipToPadding(false);
+        list.setPadding(0, 0, 0, m.dp(16));
+        adapter = new RowAdapter();
         list.setAdapter(adapter);
-        int screenH = activity.getResources().getDisplayMetrics().heightPixels;
-        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Math.min(dp(440), (int) (screenH * 0.55f)));
-        listLp.topMargin = dp(8);
-        box.addView(list, listLp);
+        page.body.addView(list, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        final TextView empty = new TextView(activity);
-        empty.setText("No matches");
-        empty.setTextColor(0x99FFFFFF);
+        final TextView empty = m.text("No matches", M3.BODY_LARGE, m.onSurfaceVariant);
         empty.setGravity(Gravity.CENTER);
-        empty.setPadding(0, dp(24), 0, dp(24));
+        empty.setPadding(0, m.dp(48), 0, m.dp(48));
         empty.setVisibility(View.GONE);
-        box.addView(empty);
+        page.body.addView(empty, 1 + (multi && max > 0 ? 2 : 1));
 
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
             @Override public void afterTextChanged(Editable s) {
                 filter(s.toString());
-                empty.setVisibility(visible.isEmpty() ? View.VISIBLE : View.GONE);
+                empty.setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
+                list.setVisibility(rows.isEmpty() ? View.GONE : View.VISIBLE);
+                list.setSelection(0);
             }
         });
         list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                int index = visible.get(position);
+                Object row = rows.get(position);
+                if (!(row instanceof Integer)) return;
+                int index = (Integer) row;
                 if (!multi) {
-                    dialog.dismiss();
+                    page.close();
                     onPick.onPick(index);
                     return;
                 }
                 if (selected.contains(index)) {
                     selected.remove(index);
                 } else if (max > 0 && selected.size() >= max) {
-                    Toast.makeText(activity, "Up to " + max + " items", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(activity, "You can choose up to " + max, Toast.LENGTH_SHORT).show();
                     return;
                 } else {
                     selected.add(index);
@@ -200,102 +200,95 @@ final class SearchablePicker {
             }
         });
 
-        AlertDialog.Builder b = new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle(title)
-                .setView(box)
-                .setNegativeButton("Cancel", null);
-        if (multi) {
-            b.setPositiveButton("Save", new DialogInterface.OnClickListener() {
-                @Override public void onClick(DialogInterface d, int which) {
-                    onSave.onSave(new ArrayList<>(selected));
-                }
-            });
-        }
-        dialog = b.create();
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
-        }
         filter("");
-        dialog.show();
         updateSaveLabel();
+        page.show();
     }
 
     private void filter(String query) {
         String q = AppInfo.normalize(query.trim());
-        visible.clear();
+        rows.clear();
         if (q.isEmpty()) {
-            visible.addAll(baseOrder);
+            if (multi && !initiallySelected.isEmpty()) {
+                rows.add("Selected");
+                rows.addAll(initiallySelected);
+                if (!rest.isEmpty()) rows.add(allLabel != null ? allLabel : "All");
+            }
+            rows.addAll(rest);
         } else {
+            List<Integer> starts = new ArrayList<>();
             List<Integer> contains = new ArrayList<>();
-            for (int i : baseOrder) {
+            for (int i = 0; i < items.size(); i++) {
                 String s = items.get(i).searchText;
-                if (s.startsWith(q) || s.contains(" " + q)) visible.add(i);
+                if (s.startsWith(q) || s.contains(" " + q)) starts.add(i);
                 else if (s.contains(q)) contains.add(i);
             }
-            visible.addAll(contains);
+            rows.addAll(starts);
+            rows.addAll(contains);
         }
         adapter.notifyDataSetChanged();
     }
 
     private void updateSaveLabel() {
-        if (!multi || dialog == null) return;
-        Button save = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
-        if (save == null) return;
-        String count = max > 0 ? selected.size() + "/" + max : String.valueOf(selected.size());
-        save.setText("Save (" + count + ")");
+        if (saveButton == null) return;
+        saveButton.setText(selected.isEmpty() ? "Save" : "Save (" + selected.size() + ")");
     }
 
-    private final class PickerAdapter extends BaseAdapter {
-        @Override public int getCount() { return visible.size(); }
-        @Override public Object getItem(int position) { return items.get(visible.get(position)); }
-        @Override public long getItemId(int position) { return visible.get(position); }
+    private final class RowAdapter extends BaseAdapter {
+        @Override public int getCount() { return rows.size(); }
+        @Override public Object getItem(int position) { return rows.get(position); }
+        @Override public long getItemId(int position) { return position; }
+        @Override public int getViewTypeCount() { return 2; }
+        @Override public int getItemViewType(int position) { return rows.get(position) instanceof String ? 0 : 1; }
+        @Override public boolean isEnabled(int position) { return rows.get(position) instanceof Integer; }
 
         @Override public View getView(int position, View convert, ViewGroup parent) {
-            LinearLayout row = (LinearLayout) convert;
-            if (row == null) {
-                row = new LinearLayout(activity);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(8), dp(9), dp(4), dp(9));
-                row.setMinimumHeight(dp(52));
+            Object row = rows.get(position);
+            if (row instanceof String) {
+                TextView h = convert instanceof TextView ? (TextView) convert : m.subheader("");
+                h.setText((String) row);
+                return h;
+            }
+            LinearLayout v = (LinearLayout) convert;
+            if (v == null) {
+                v = new LinearLayout(activity);
+                v.setOrientation(LinearLayout.HORIZONTAL);
+                v.setGravity(Gravity.CENTER_VERTICAL);
+                v.setPadding(m.dp(16), m.dp(8), m.dp(multi ? 12 : 24), m.dp(8));
+                v.setBackground(m.ripple(m.onSurface, null, 0));
 
                 ImageView icon = new ImageView(activity);
-                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(36), dp(36));
-                ip.rightMargin = dp(14);
-                row.addView(icon, ip);
+                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(m.dp(40), m.dp(40));
+                ip.rightMargin = m.dp(16);
+                v.addView(icon, ip);
 
                 LinearLayout texts = new LinearLayout(activity);
                 texts.setOrientation(LinearLayout.VERTICAL);
-                TextView t = new TextView(activity);
-                t.setTextColor(Color.WHITE);
-                t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                t.setTypeface(Fonts.medium);
+                TextView t = m.text("", M3.BODY_LARGE, m.onSurface);
                 t.setSingleLine(true);
                 t.setEllipsize(TextUtils.TruncateAt.END);
-                TextView s = new TextView(activity);
-                s.setTextColor(0x99FFFFFF);
-                s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                s.setTypeface(Fonts.regular);
+                TextView s = m.text("", M3.BODY_MEDIUM, m.onSurfaceVariant);
                 s.setSingleLine(true);
                 s.setEllipsize(TextUtils.TruncateAt.END);
+                s.setPadding(0, m.dp(2), 0, 0);
                 texts.addView(t);
                 texts.addView(s);
-                row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                v.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-                CheckBox check = new CheckBox(activity);
-                check.setClickable(false);
-                check.setFocusable(false);
-                row.addView(check);
+                CheckBox check = m.checkBox();
+                LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cp.leftMargin = m.dp(16);
+                v.addView(check, cp);
             }
-            Item item = items.get(visible.get(position));
-            ImageView icon = (ImageView) row.getChildAt(0);
-            LinearLayout texts = (LinearLayout) row.getChildAt(1);
-            CheckBox check = (CheckBox) row.getChildAt(2);
+            Item item = items.get((Integer) row);
+            ImageView icon = (ImageView) v.getChildAt(0);
+            LinearLayout texts = (LinearLayout) v.getChildAt(1);
+            CheckBox check = (CheckBox) v.getChildAt(2);
             if (item.hasIcon()) {
                 icon.setVisibility(View.VISIBLE);
                 icon.setImageDrawable(item.icon());
-                icon.setColorFilter(theme.grayscale ? Theme.grayscaleFilter() : null);
+                icon.setColorFilter(m.theme.grayscale ? Theme.grayscaleFilter() : null);
             } else {
                 icon.setVisibility(View.GONE);
             }
@@ -303,13 +296,10 @@ final class SearchablePicker {
             TextView sub = (TextView) texts.getChildAt(1);
             sub.setText(item.subtitle);
             sub.setVisibility(TextUtils.isEmpty(item.subtitle) ? View.GONE : View.VISIBLE);
+            v.setMinimumHeight(m.dp(TextUtils.isEmpty(item.subtitle) ? 56 : 72));
             check.setVisibility(multi ? View.VISIBLE : View.GONE);
-            check.setChecked(selected.contains(visible.get(position)));
-            return row;
+            check.setChecked(selected.contains(row));
+            return v;
         }
-    }
-
-    private int dp(float v) {
-        return Math.round(v * density);
     }
 }

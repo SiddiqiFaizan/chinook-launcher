@@ -46,7 +46,7 @@ final class WidgetBinder {
     private static final int HOST_ID = 0x0CA5;
 
     private final Activity activity;
-    private final Theme theme;
+    private final M3 m;
     private final AppWidgetManager manager;
     private final AppWidgetHost host;
     private final float density;
@@ -55,9 +55,9 @@ final class WidgetBinder {
     private AppWidgetProviderInfo pendingInfo;
     private Callback pendingCallback;
 
-    WidgetBinder(Activity activity, Theme theme) {
+    WidgetBinder(Activity activity, M3 m) {
         this.activity = activity;
-        this.theme = theme;
+        this.m = m;
         this.density = activity.getResources().getDisplayMetrics().density;
         this.manager = AppWidgetManager.getInstance(activity);
         this.host = new AppWidgetHost(activity.getApplicationContext(), HOST_ID) {
@@ -148,7 +148,7 @@ final class WidgetBinder {
                         }
                     }, null));
         }
-        SearchablePicker.single(activity, theme, "Add widget", items, "Search widgets or apps",
+        SearchablePicker.single(activity, m, "Add widget", items, "Search widgets or apps",
                 new SearchablePicker.OnPick() {
                     @Override public void onPick(int index) {
                         bind(providers.get(index), callback);

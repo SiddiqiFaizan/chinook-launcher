@@ -86,6 +86,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private Prefs prefs;
     private Theme theme;
+    private M3 m3;
+    private Surfaces.Page settingsPage;
+    private LinearLayout settingsColumn;
+    /** Set before recreate() (theme/font change) so Settings reopens where the user was. */
+    private static boolean reopenSettings;
     private AppRepository repo;
     private WidgetBinder widgetBinder;
     private TopCards topCards;
@@ -144,6 +149,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         prefs = new Prefs(this);
         theme = Theme.forId(prefs.theme());
         Fonts.init(this, prefs.bundledFont());
+        m3 = M3.of(this, theme);
         repo = new AppRepository(this);
 
         getWindow().getDecorView().setSystemUiVisibility(
@@ -155,8 +161,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         setContentView(root);
         setupGestures();
 
-        widgetBinder = new WidgetBinder(this, theme);
-        topCards = new TopCards(this, prefs, theme, this, widgetBinder, pager, pagerDots);
+        widgetBinder = new WidgetBinder(this, m3);
+        topCards = new TopCards(this, prefs, m3, this, widgetBinder, pager, pagerDots);
         topCards.render();
         renderWorldClocks();
         updateAlarm();
@@ -168,6 +174,14 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (!prefs.askedDefault()) {
             prefs.setAskedDefault();
             requestDefaultLauncher();
+        }
+        if (reopenSettings) {
+            reopenSettings = false;
+            root.post(new Runnable() {
+                @Override public void run() {
+                    showSettings();
+                }
+            });
         }
     }
 
@@ -205,6 +219,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     @Override protected void onResume() {
         super.onResume();
         refreshDots();
+        // Values like notification access or default launcher may have changed in system settings.
+        if (settingsPage != null) buildSettings();
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -436,50 +452,36 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         scroll.setHorizontalScrollBarEnabled(false);
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setPadding(dp(8), 0, 0, 0);
-        bar.addView(editButton("+ Apps", false, new View.OnClickListener() {
+        bar.setPadding(dp(8), dp(4), dp(8), dp(4));
+        bar.addView(withGap(m3.tonalButton("Apps", R.drawable.ic_add, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 showFavoritesPicker();
             }
-        }));
-        bar.addView(editButton("+ Top card", false, new View.OnClickListener() {
+        })));
+        bar.addView(withGap(m3.tonalButton("Top card", R.drawable.ic_view_carousel, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 topCards.showAddCard();
             }
-        }));
-        bar.addView(editButton("+ Clock", false, new View.OnClickListener() {
+        })));
+        bar.addView(withGap(m3.tonalButton("Clock", R.drawable.ic_public, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                showZonePicker();
+                showWorldClocksPage();
             }
-        }));
-        bar.addView(editButton("Done", true, new View.OnClickListener() {
+        })));
+        bar.addView(withGap(m3.filledButton("Done", R.drawable.ic_check, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 setEditMode(false);
             }
-        }));
+        })));
         scroll.addView(bar);
         return scroll;
     }
 
-    private TextView editButton(String text, boolean primary, View.OnClickListener click) {
-        TextView b = new TextView(this);
-        b.setText(text);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        b.setTypeface(Fonts.medium);
-        b.setGravity(Gravity.CENTER);
-        b.setPadding(dp(16), dp(9), dp(16), dp(9));
-        if (primary) {
-            b.setTextColor(theme.solidBackground != 0 || theme.grayscale ? Color.BLACK : 0xFF0E1015);
-            b.setBackground(pill(theme.accent, 0));
-        } else {
-            b.setTextColor(theme.text);
-            b.setBackground(pill(0x1AFFFFFF, theme.textSecondary));
-        }
-        b.setOnClickListener(click);
+    private View withGap(View v) {
         LinearLayout.LayoutParams lp = wrap();
         lp.rightMargin = dp(8);
-        b.setLayoutParams(lp);
-        return b;
+        v.setLayoutParams(lp);
+        return v;
     }
 
     private void setupGestures() {
@@ -635,37 +637,27 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         Row r = (Row) row.getTag();
         r.label.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         r.dot.setVisibility(View.GONE);
-        if (index > 0) row.addView(controlButton("↑", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                Collections.swap(favorites, index, index - 1);
-                saveFavorites();
-            }
-        }));
-        if (index < favorites.size() - 1) row.addView(controlButton("↓", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                Collections.swap(favorites, index, index + 1);
-                saveFavorites();
-            }
-        }));
-        row.addView(controlButton("✕", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                favorites.remove(index);
-                saveFavorites();
-            }
-        }));
-    }
-
-    private TextView controlButton(String glyph, View.OnClickListener click) {
-        TextView b = new TextView(this);
-        b.setText(glyph);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        b.setTypeface(Fonts.medium);
-        b.setTextColor(theme.textSecondary);
-        b.setGravity(Gravity.CENTER);
-        b.setBackground(ripple(dp(20)));
-        b.setOnClickListener(click);
-        b.setLayoutParams(new LinearLayout.LayoutParams(dp(40), dp(40)));
-        return b;
+        if (index > 0) row.addView(m3.iconButton(R.drawable.ic_arrow_upward, theme.textSecondary, "Move up",
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        Collections.swap(favorites, index, index - 1);
+                        saveFavorites();
+                    }
+                }));
+        if (index < favorites.size() - 1) row.addView(m3.iconButton(R.drawable.ic_arrow_downward, theme.textSecondary,
+                "Move down", new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        Collections.swap(favorites, index, index + 1);
+                        saveFavorites();
+                    }
+                }));
+        row.addView(m3.iconButton(R.drawable.ic_close, theme.textSecondary, "Remove from home",
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        favorites.remove(index);
+                        saveFavorites();
+                    }
+                }));
     }
 
     private void setEditMode(boolean on) {
@@ -729,13 +721,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             item.setBackground(ripple(dp(12)));
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    showWorldClockMenu(zone, v);
-                }
-            });
-            item.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override public boolean onLongClick(View v) {
-                    showWorldClockMenu(zone, v);
-                    return true;
+                    showWorldClocksPage();
                 }
             });
             LinearLayout.LayoutParams lp = wrap();
@@ -752,43 +738,75 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         }
     }
 
-    private void showWorldClockMenu(final String zone, View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        final List<String> zones = prefs.worldClocks();
-        final int index = zones.indexOf(zone);
-        menu.getMenu().add(0, 1, 0, WorldClocks.city(zone) + "  ·  " + WorldClocks.gmtOffset(zone)).setEnabled(false);
-        if (index > 0) menu.getMenu().add(0, 2, 1, "Move left");
-        if (index < zones.size() - 1) menu.getMenu().add(0, 3, 2, "Move right");
-        menu.getMenu().add(0, 4, 3, "Add another city");
-        menu.getMenu().add(0, 5, 4, "Remove");
-        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
-            @Override public boolean onMenuItemClick(MenuItem item) {
-                switch (item.getItemId()) {
-                    case 2: Collections.swap(zones, index, index - 1); break;
-                    case 3: Collections.swap(zones, index, index + 1); break;
-                    case 4: showZonePicker(); return true;
-                    case 5: zones.remove(index); break;
-                    default: return true;
+    private void showWorldClocksPage() {
+        final Surfaces.Page page = new Surfaces.Page(this, m3, "World clocks");
+        final LinearLayout column = page.scrollingBody();
+        final Runnable[] rebuild = new Runnable[1];
+        rebuild[0] = new Runnable() {
+            @Override public void run() {
+                column.removeAllViews();
+                final List<String> zones = prefs.worldClocks();
+                if (zones.isEmpty()) {
+                    TextView empty = m3.text("No world clocks yet.\nAdd a city to see its time on your clock card.",
+                            M3.BODY_LARGE, m3.onSurfaceVariant);
+                    empty.setPadding(dp(24), dp(24), dp(24), dp(24));
+                    column.addView(empty);
+                    return;
                 }
-                prefs.setWorldClocks(zones);
-                renderWorldClocks();
-                return true;
+                column.addView(m3.subheader("On your clock card"));
+                for (int i = 0; i < zones.size(); i++) {
+                    final int index = i;
+                    String zone = zones.get(i);
+                    LinearLayout controls = new LinearLayout(MainActivity.this);
+                    controls.setOrientation(LinearLayout.HORIZONTAL);
+                    if (i > 0) controls.addView(m3.iconButton(R.drawable.ic_arrow_upward, m3.onSurfaceVariant, "Move up",
+                            new View.OnClickListener() {
+                                @Override public void onClick(View v) {
+                                    Collections.swap(zones, index, index - 1);
+                                    prefs.setWorldClocks(zones);
+                                    renderWorldClocks();
+                                    rebuild[0].run();
+                                }
+                            }));
+                    controls.addView(m3.iconButton(R.drawable.ic_delete, m3.onSurfaceVariant, "Remove",
+                            new View.OnClickListener() {
+                                @Override public void onClick(View v) {
+                                    zones.remove(index);
+                                    prefs.setWorldClocks(zones);
+                                    renderWorldClocks();
+                                    rebuild[0].run();
+                                }
+                            }));
+                    column.addView(m3.listItem(0, null, WorldClocks.city(zone),
+                            WorldClocks.region(zone) + "  \u00B7  " + WorldClocks.gmtOffset(zone), controls, null));
+                }
             }
-        });
-        menu.show();
+        };
+        page.action(m3.filledButton("Add city", R.drawable.ic_add, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                showZonePicker(rebuild[0]);
+            }
+        }));
+        rebuild[0].run();
+        page.show();
     }
 
     private void showZonePicker() {
+        showZonePicker(null);
+    }
+
+    private void showZonePicker(final Runnable after) {
         final List<String> zones = WorldClocks.allZones();
         List<SearchablePicker.Item> items = new ArrayList<>();
         for (String z : zones) {
             items.add(new SearchablePicker.Item(WorldClocks.city(z),
                     WorldClocks.region(z) + "  \u00B7  " + WorldClocks.gmtOffset(z), null));
         }
-        SearchablePicker.single(this, theme, "Add world clock", items, "Search city, region or GMT",
+        SearchablePicker.single(this, m3, "Add a city", items, "Search city, region or GMT",
                 new SearchablePicker.OnPick() {
                     @Override public void onPick(int index) {
                         addWorldClock(zones.get(index));
+                        if (after != null) after.run();
                     }
                 });
     }
@@ -1192,7 +1210,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             Integer i = indexByKey.get(k);
             if (i != null) initial.add(i);
         }
-        SearchablePicker.multi(this, theme, "Home apps", items, initial, 0, "Search apps",
+        SearchablePicker.multi(this, m3, "Home apps", items, initial, 0, "Search apps", "All apps",
                 new SearchablePicker.OnSave() {
                     @Override public void onSave(List<Integer> selectedInOrder) {
                         List<String> next = new ArrayList<>();
@@ -1206,90 +1224,262 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     // -------------------------------------------------------- settings
 
     private void showHomeMenu() {
-        String[] items = {
-                "Edit home screen",
-                "Add top card (widget or apps)",
-                "Add world clock",
-                "Theme: " + Theme.NAMES[theme.id],
-                "Lock screen",
-                "Wallpaper",
-                "More settings",
-        };
-        dialog()
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        switch (which) {
-                            case 0: setEditMode(true); break;
-                            case 1: topCards.showAddCard(); break;
-                            case 2: showZonePicker(); break;
-                            case 3: showThemePicker(); break;
-                            case 4: new LockScreenDesigner(MainActivity.this, prefs, theme).show(); break;
-                            case 5:
-                                safeStart(Intent.createChooser(new Intent(Intent.ACTION_SET_WALLPAPER), "Choose wallpaper"));
-                                break;
-                            case 6: showSettings(); break;
-                        }
+        new Surfaces.Sheet(this, m3, null)
+                .item(R.drawable.ic_edit, "Edit home screen", "Reorder, add or remove home apps", new Runnable() {
+                    @Override public void run() {
+                        setEditMode(true);
+                    }
+                })
+                .item(R.drawable.ic_view_carousel, "Add top card", "Widget, app shortcuts or clock", new Runnable() {
+                    @Override public void run() {
+                        topCards.showAddCard();
+                    }
+                })
+                .item(R.drawable.ic_public, "World clocks", worldClocksSummary(), new Runnable() {
+                    @Override public void run() {
+                        showWorldClocksPage();
+                    }
+                })
+                .item(R.drawable.ic_palette, "Theme", Theme.NAMES[theme.id], new Runnable() {
+                    @Override public void run() {
+                        showThemePicker();
+                    }
+                })
+                .item(R.drawable.ic_lock, "Lock screen", "Minimal wallpaper designs", new Runnable() {
+                    @Override public void run() {
+                        new LockScreenDesigner(MainActivity.this, prefs, m3).show();
+                    }
+                })
+                .item(R.drawable.ic_settings, "Settings", null, new Runnable() {
+                    @Override public void run() {
+                        showSettings();
                     }
                 })
                 .show();
+    }
+
+    private String worldClocksSummary() {
+        List<String> zones = prefs.worldClocks();
+        if (zones.isEmpty()) return "None added";
+        List<String> cities = new ArrayList<>();
+        for (String z : zones) cities.add(WorldClocks.city(z));
+        return TextUtils.join(", ", cities);
     }
 
     private void showThemePicker() {
-        dialog()
-                .setTitle("Theme")
-                .setSingleChoiceItems(Theme.NAMES, theme.id, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        d.dismiss();
-                        if (which != theme.id) {
-                            prefs.setTheme(which);
-                            recreate();
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, "Theme");
+        String[] supporting = {
+                "Your wallpaper with Material You colours",
+                "Dimmed wallpaper with muted greys",
+                "Pure black, greyscale icons and widgets",
+        };
+        int[] swatch = {theme.id == Theme.COLORED ? m3.primary : 0xFF8AB4FF, 0xFF5F6368, 0xFFFFFFFF};
+        for (int i = 0; i < Theme.NAMES.length; i++) {
+            final int id = i;
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(i == Theme.MONO ? Color.BLACK : swatch[i]);
+            if (i == Theme.MONO) dot.setStroke(dp(2), swatch[i]);
+            sheet.add(m3.listItem(0, dot, Theme.NAMES[i], supporting[i], m3.radio(i == theme.id),
+                    new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            sheet.dismissThen(new Runnable() {
+                                @Override public void run() {
+                                    if (id == theme.id) return;
+                                    prefs.setTheme(id);
+                                    reopenSettings = settingsPage != null;
+                                    recreate();
+                                }
+                            });
                         }
-                    }
-                })
-                .show();
+                    }));
+        }
+        sheet.show();
+    }
+
+    private void showFontPicker() {
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, "Font");
+        final boolean bundled = prefs.bundledFont();
+        String[] names = {"Manrope", "System default"};
+        String[] supporting = {"Clean geometric sans", "Your phone's own font"};
+        for (int i = 0; i < 2; i++) {
+            final boolean choice = i == 0;
+            sheet.add(m3.listItem(R.drawable.ic_text_fields, null, names[i], supporting[i], m3.radio(choice == bundled),
+                    new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            sheet.dismissThen(new Runnable() {
+                                @Override public void run() {
+                                    if (choice == bundled) return;
+                                    prefs.setBundledFont(choice);
+                                    reopenSettings = settingsPage != null;
+                                    recreate();
+                                }
+                            });
+                        }
+                    }));
+        }
+        sheet.show();
+    }
+
+    private interface Toggle {
+        void set(boolean on);
+    }
+
+    private View switchItem(int icon, String title, String supporting, boolean checked, final Toggle toggle) {
+        final android.widget.Switch sw = m3.switchView(checked);
+        return m3.listItem(icon, null, title, supporting, sw, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sw.setChecked(!sw.isChecked());
+                toggle.set(sw.isChecked());
+            }
+        });
+    }
+
+    private static View.OnClickListener run(final Runnable r) {
+        return new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                r.run();
+            }
+        };
     }
 
     private void showSettings() {
-        final boolean icons = prefs.showHomeIcons();
-        final boolean font = prefs.bundledFont();
-        final boolean alarm = prefs.showAlarm();
-        final boolean dots = NotificationDotService.isEnabled(this);
-        String[] items = {
-                "Icons on home: " + (icons ? "on" : "off"),
-                "Font: " + (font ? "Manrope" : "System"),
-                "Next alarm under date: " + (alarm ? "on" : "off"),
-                "Notification dots: " + (dots ? "on" : "off"),
-                "Hidden apps",
-                "Set as default launcher",
-                "About Chinook",
-        };
-        dialog()
-                .setTitle("Settings")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        switch (which) {
-                            case 0:
-                                prefs.setShowHomeIcons(!icons);
-                                renderFavorites();
-                                break;
-                            case 1:
-                                prefs.setBundledFont(!font);
-                                recreate();
-                                break;
-                            case 2:
-                                prefs.setShowAlarm(!alarm);
-                                updateAlarm();
-                                break;
-                            case 3:
-                                safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
-                                break;
-                            case 4: showHiddenApps(); break;
-                            case 5: requestDefaultLauncher(); break;
-                            case 6: showAbout(); break;
-                        }
+        settingsPage = new Surfaces.Page(this, m3, "Settings");
+        settingsColumn = settingsPage.scrollingBody();
+        settingsPage.onClose(new Runnable() {
+            @Override public void run() {
+                settingsPage = null;
+            }
+        });
+        buildSettings();
+        settingsPage.show();
+    }
+
+    private void buildSettings() {
+        LinearLayout c = settingsColumn;
+        c.removeAllViews();
+
+        c.addView(m3.subheader("Appearance"));
+        c.addView(m3.listItem(R.drawable.ic_palette, null, "Theme", Theme.NAMES[theme.id], null, run(new Runnable() {
+            @Override public void run() {
+                showThemePicker();
+            }
+        })));
+        c.addView(m3.listItem(R.drawable.ic_text_fields, null, "Font",
+                prefs.bundledFont() ? "Manrope" : "System default", null, run(new Runnable() {
+                    @Override public void run() {
+                        showFontPicker();
                     }
-                })
-                .show();
+                })));
+        c.addView(switchItem(R.drawable.ic_apps, "Icons on home screen", "Show app icons next to names",
+                prefs.showHomeIcons(), new Toggle() {
+                    @Override public void set(boolean on) {
+                        prefs.setShowHomeIcons(on);
+                        renderFavorites();
+                    }
+                }));
+
+        c.addView(m3.subheader("Home screen"));
+        c.addView(m3.listItem(R.drawable.ic_edit, null, "Edit home screen", "Reorder, add or remove home apps",
+                null, run(new Runnable() {
+                    @Override public void run() {
+                        settingsPage.close();
+                        setEditMode(true);
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_view_carousel, null, "Add top card", "Widget, app shortcuts or clock",
+                null, run(new Runnable() {
+                    @Override public void run() {
+                        topCards.showAddCard();
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_height, null, "Top card height", prefs.cardHeightDp() + " dp",
+                null, run(new Runnable() {
+                    @Override public void run() {
+                        topCards.showHeight(new Runnable() {
+                            @Override public void run() {
+                                if (settingsPage != null) buildSettings();
+                            }
+                        });
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_public, null, "World clocks", worldClocksSummary(), null, run(new Runnable() {
+            @Override public void run() {
+                showWorldClocksPage();
+            }
+        })));
+        c.addView(switchItem(R.drawable.ic_alarm, "Next alarm", "Show your next alarm under the date",
+                prefs.showAlarm(), new Toggle() {
+                    @Override public void set(boolean on) {
+                        prefs.setShowAlarm(on);
+                        updateAlarm();
+                    }
+                }));
+
+        c.addView(m3.subheader("Apps"));
+        int hiddenCount = 0;
+        Set<String> hidden = prefs.hidden();
+        for (AppInfo a : rawApps) if (hidden.contains(a.key)) hiddenCount++;
+        c.addView(m3.listItem(R.drawable.ic_visibility_off, null, "Hidden apps",
+                hiddenCount == 0 ? "None" : hiddenCount + (hiddenCount == 1 ? " app" : " apps"), null, run(new Runnable() {
+                    @Override public void run() {
+                        showHiddenApps();
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_notifications, null, "Notification dots",
+                NotificationDotService.isEnabled(this) ? "On" : "Off · needs notification access", null,
+                run(new Runnable() {
+                    @Override public void run() {
+                        safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+                    }
+                })));
+
+        c.addView(m3.subheader("Wallpaper & lock screen"));
+        c.addView(m3.listItem(R.drawable.ic_lock, null, "Lock screen", "Minimal designs for Colored, Dark and Black & White",
+                null, run(new Runnable() {
+                    @Override public void run() {
+                        new LockScreenDesigner(MainActivity.this, prefs, m3).show();
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_wallpaper, null, "Wallpaper", "Choose a photo or system wallpaper",
+                null, run(new Runnable() {
+                    @Override public void run() {
+                        safeStart(Intent.createChooser(new Intent(Intent.ACTION_SET_WALLPAPER), "Choose wallpaper"));
+                    }
+                })));
+
+        c.addView(m3.subheader("System"));
+        c.addView(m3.listItem(R.drawable.ic_home, null, "Default home app",
+                isDefaultLauncher() ? "Chinook is your home app" : "Tap to make Chinook your home app", null,
+                run(new Runnable() {
+                    @Override public void run() {
+                        requestDefaultLauncher();
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_info, null, "About Chinook", "Version " + versionName(), null,
+                run(new Runnable() {
+                    @Override public void run() {
+                        showAbout();
+                    }
+                })));
+    }
+
+    private boolean isDefaultLauncher() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            RoleManager rm = getSystemService(RoleManager.class);
+            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) return rm.isRoleHeld(RoleManager.ROLE_HOME);
+        }
+        ResolveInfo ri = getPackageManager().resolveActivity(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY);
+        return ri != null && ri.activityInfo != null && getPackageName().equals(ri.activityInfo.packageName);
+    }
+
+    private String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException e) {
+            return "";
+        }
     }
 
     private void showHiddenApps() {
@@ -1301,7 +1491,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             items.add(new SearchablePicker.Item(apps.get(i).label, null, apps.get(i).icon));
             if (hidden.contains(apps.get(i).key)) initial.add(i);
         }
-        SearchablePicker.multi(this, theme, "Hidden apps (ticked = hidden)", items, initial, 0, "Search apps",
+        SearchablePicker.multi(this, m3, "Hidden apps", items, initial, 0, "Search apps", "Visible apps",
                 new SearchablePicker.OnSave() {
                     @Override public void onSave(List<Integer> selectedInOrder) {
                         Set<String> next = new HashSet<>();
@@ -1311,25 +1501,23 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         prefs.setFavorites(favorites);
                         applyApps();
                         topCards.render();
+                        if (settingsPage != null) buildSettings();
                     }
                 });
     }
 
     private void showAbout() {
-        dialog()
-                .setTitle("Chinook Launcher")
-                .setMessage("A minimal, open-source launcher.\n\n"
-                        + "• Slide along the letters, then onto an app and let go to open it\n"
-                        + "• Swipe up to search, swipe down for notifications\n"
-                        + "• Long-press an app for shortcuts and options\n"
-                        + "• Long-press empty space to edit home, add widgets, clocks or change theme\n\n"
-                        + "Font: Manrope (SIL Open Font License).")
-                .setPositiveButton("OK", null)
-                .show();
-    }
-
-    private AlertDialog.Builder dialog() {
-        return new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert);
+        Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, "Chinook Launcher");
+        TextView body = m3.text("A minimal, open-source launcher.\n\n"
+                + "•  Slide along the letters, then onto an app and let go to open it. ★ shows your home apps.\n"
+                + "•  Swipe the top cards sideways for your clock, widgets and app shortcuts.\n"
+                + "•  Swipe up to search, swipe down for notifications.\n"
+                + "•  Long-press an app, a card or empty space for options.\n\n"
+                + "Version " + versionName() + "  ·  Font: Manrope (SIL OFL)  ·  Icons: Material Icons (Apache 2.0)",
+                M3.BODY_MEDIUM, m3.onSurfaceVariant);
+        body.setPadding(dp(24), 0, dp(24), dp(8));
+        sheet.add(body);
+        sheet.show();
     }
 
     // ------------------------------------------------------- top cards
