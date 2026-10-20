@@ -331,6 +331,30 @@ final class M3 {
         return v;
     }
 
+    /** Material large badge: a pill with the notification count ("99+" beyond 99). */
+    TextView badge() {
+        TextView b = new TextView(context);
+        b.setTextColor(onPrimary);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        b.setTypeface(Fonts.medium);
+        b.setIncludeFontPadding(false);
+        b.setGravity(Gravity.CENTER);
+        b.setMinWidth(dp(16));
+        b.setMinimumWidth(dp(16));
+        b.setPadding(dp(4), 0, dp(4), 0);
+        b.setBackground(shape(primary, 8));
+        return b;
+    }
+
+    static void setBadgeCount(TextView badge, int count) {
+        if (count <= 0) {
+            badge.setVisibility(View.GONE);
+            return;
+        }
+        badge.setText(count > 99 ? "99+" : String.valueOf(count));
+        badge.setVisibility(View.VISIBLE);
+    }
+
     // -------------------------------------------------------- controls
 
     Switch switchView(boolean checked) {

@@ -105,6 +105,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private FrameLayout root;
     private LinearLayout home;
     private View clockBlock;
+    private TextClock clockView;
     private LinearLayout clockContent;
     private CardPager pager;
     private LinearLayout pagerDots;
@@ -174,6 +175,14 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (!prefs.askedDefault()) {
             prefs.setAskedDefault();
             requestDefaultLauncher();
+        }
+        if (prefs.askedDefault() && !prefs.askedDots() && !NotificationDotService.isEnabled(this)) {
+            prefs.setAskedDots();
+            root.postDelayed(new Runnable() {
+                @Override public void run() {
+                    showNotificationAccessSheet();
+                }
+            }, 1200);
         }
         if (reopenSettings) {
             reopenSettings = false;
@@ -264,7 +273,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         TextClock clock = new TextClock(this);
         clock.setFormat12Hour("h:mm");
         clock.setFormat24Hour("H:mm");
-        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 68);
+        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, prefs.clockSizeSp());
+        clockView = clock;
         clock.setTypeface(Fonts.light);
         clock.setIncludeFontPadding(false);
         styleText(clock, theme.text);
@@ -317,10 +327,6 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         worldRow.setOrientation(LinearLayout.HORIZONTAL);
         worldRow.setPadding(dp(8), 0, 0, 0);
         worldScroll.addView(worldRow);
-        LinearLayout.LayoutParams worldLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        worldLp.topMargin = dp(22);
-        clockContent.addView(worldScroll, worldLp);
 
         // Top slider: clock, widgets and app cards; swipe sideways, loops with 3+ cards.
         pager = new CardPager(this);
@@ -335,6 +341,12 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(18));
         dotsLp.topMargin = dp(8);
         home.addView(pagerDots, dotsLp);
+
+        // World clocks: their own row, close under the top cards with room to tap either.
+        LinearLayout.LayoutParams worldLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        worldLp.topMargin = dp(14);
+        home.addView(worldScroll, worldLp);
 
         home.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
 
@@ -497,7 +509,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             }
 
             @Override public void onLongPress(MotionEvent e) {
-                if (hitsChild(favoritesContainer, e) || hitsView(pager, e) || hitsView(editBar, e)) return;
+                if (hitsChild(favoritesContainer, e) || hitsView(pager, e) || hitsChild(worldRow, e)
+                        || hitsView(editBar, e)) return;
                 root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                 showHomeMenu();
             }
@@ -635,8 +648,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private void addEditControls(LinearLayout row, final int index) {
         Row r = (Row) row.getTag();
-        r.label.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        r.dot.setVisibility(View.GONE);
+        r.texts.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        r.badge.setVisibility(View.GONE);
+        r.preview.setVisibility(View.GONE);
         if (index > 0) row.addView(m3.iconButton(R.drawable.ic_arrow_upward, theme.textSecondary, "Move up",
                 new View.OnClickListener() {
                     @Override public void onClick(View v) {
@@ -676,6 +690,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (!appsLoaded) return;
         renderFavorites();
         adapter.notifyDataSetChanged();
+        topCards.updateBadges();
+        for (int i = 0; i < panelList.getChildCount(); i++) {
+            Object tag = panelList.getChildAt(i).getTag();
+            if (tag instanceof Row && ((Row) tag).app != null) {
+                M3.setBadgeCount(((Row) tag).badge, NotificationDotService.count(((Row) tag).app.packageName()));
+            }
+        }
     }
 
     // ------------------------------------------------------ world time
@@ -688,7 +709,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         for (final String zone : zones) {
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
-            item.setPadding(0, dp(4), dp(10), dp(4));
+            item.setPadding(dp(8), dp(6), dp(12), dp(6));
+            item.setMinimumHeight(dp(48));
 
             TextView city = new TextView(this);
             city.setText(WorldClocks.city(zone).toUpperCase(Locale.getDefault()));
@@ -816,8 +838,6 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (!current.contains(zone)) current.add(zone);
         prefs.setWorldClocks(current);
         renderWorldClocks();
-        // World clocks live on the clock card: make sure it exists and bring it into view.
-        topCards.showClockCard();
         Toast.makeText(this, "Added " + WorldClocks.city(zone), Toast.LENGTH_SHORT).show();
     }
 
@@ -1321,6 +1341,104 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         sheet.show();
     }
 
+    private static final int SIZE_LABEL = 0;
+    private static final int SIZE_ICON = 1;
+    private static final int SIZE_CLOCK = 2;
+    private static final String[] SIZE_NAMES = {"Small", "Default", "Large", "Extra large"};
+    private static final int[] LABEL_SIZES = {19, 23, 27, 31};
+    private static final int[] ICON_SIZES = {24, 30, 38, 46};
+    private static final int[] CLOCK_SIZES = {52, 68, 84, 100};
+
+    private static String sizeName(int[] sizes, int value) {
+        for (int i = 0; i < sizes.length; i++) if (sizes[i] == value) return SIZE_NAMES[i];
+        return "Custom";
+    }
+
+    /** Size chooser: every option shows a live preview and its exact size. */
+    private void showSizePicker(final int which) {
+        final int[] sizes = which == SIZE_LABEL ? LABEL_SIZES : which == SIZE_ICON ? ICON_SIZES : CLOCK_SIZES;
+        final int current = which == SIZE_LABEL ? prefs.labelSizeSp()
+                : which == SIZE_ICON ? prefs.iconSizeDp() : prefs.clockSizeSp();
+        String title = which == SIZE_LABEL ? "Text size" : which == SIZE_ICON ? "Icon size" : "Clock size";
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, title);
+        AppInfo sample = favoriteApps().isEmpty() ? (visibleApps.isEmpty() ? null : visibleApps.get(0))
+                : favoriteApps().get(0);
+        for (int i = 0; i < sizes.length; i++) {
+            final int size = sizes[i];
+            String unit = which == SIZE_ICON ? " dp" : " sp";
+            LinearLayout row = m3.listItem(0, null, SIZE_NAMES[i], size + unit + (i == 1 ? " \u00B7 default" : ""),
+                    m3.radio(size == current), new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            sheet.dismissThen(new Runnable() {
+                                @Override public void run() {
+                                    applySize(which, size);
+                                }
+                            });
+                        }
+                    });
+            View preview;
+            if (which == SIZE_ICON) {
+                ImageView icon = new ImageView(this);
+                icon.setImageDrawable(sample != null ? sample.icon : getDrawable(R.mipmap.ic_launcher));
+                if (theme.grayscale) icon.setColorFilter(Theme.grayscaleFilter());
+                icon.setLayoutParams(new LinearLayout.LayoutParams(dp(size), dp(size)));
+                preview = icon;
+            } else {
+                TextView t = new TextView(this);
+                t.setText(which == SIZE_LABEL ? (sample != null ? sample.label : "Messages") : "9:41");
+                t.setTextColor(m3.onSurface);
+                t.setTypeface(which == SIZE_LABEL ? Fonts.medium : Fonts.light);
+                // The clock is shown at half scale so every option fits on screen.
+                t.setTextSize(TypedValue.COMPLEX_UNIT_SP, which == SIZE_CLOCK ? size / 2f : size);
+                t.setSingleLine(true);
+                t.setEllipsize(TextUtils.TruncateAt.END);
+                t.setLayoutParams(new LinearLayout.LayoutParams(dp(which == SIZE_LABEL ? 150 : 110),
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+                preview = t;
+            }
+            ((LinearLayout.LayoutParams) preview.getLayoutParams()).rightMargin = dp(16);
+            ((LinearLayout.LayoutParams) preview.getLayoutParams()).gravity = Gravity.CENTER_VERTICAL;
+            row.addView(preview, 0);
+            sheet.add(row);
+        }
+        sheet.show();
+    }
+
+    private void applySize(int which, int size) {
+        if (which == SIZE_LABEL) prefs.setLabelSizeSp(size);
+        else if (which == SIZE_ICON) prefs.setIconSizeDp(size);
+        else prefs.setClockSizeSp(size);
+        clockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, prefs.clockSizeSp());
+        renderFavorites();
+        // Drop recycled rows so the drawer picks up the new sizes.
+        list.setAdapter(adapter);
+        if (settingsPage != null) buildSettings();
+    }
+
+    private void showNotificationAccessSheet() {
+        final Surfaces.Sheet sheet = new Surfaces.Sheet(this, m3, "Show notifications on your apps");
+        TextView body = m3.text("Allow notification access so Chinook can show unread counts on every app and the "
+                        + "newest message under your home screen apps. Nothing leaves your phone.",
+                M3.BODY_MEDIUM, m3.onSurfaceVariant);
+        body.setPadding(dp(24), 0, dp(24), dp(8));
+        sheet.add(body);
+        sheet.action(m3.textButton("Not now", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sheet.dismiss();
+            }
+        }));
+        sheet.action(m3.filledButton("Allow", 0, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sheet.dismissThen(new Runnable() {
+                    @Override public void run() {
+                        safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+                    }
+                });
+            }
+        }));
+        sheet.show();
+    }
+
     private interface Toggle {
         void set(boolean on);
     }
@@ -1369,6 +1487,27 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 prefs.bundledFont() ? "Manrope" : "System default", null, run(new Runnable() {
                     @Override public void run() {
                         showFontPicker();
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_text_fields, null, "Text size",
+                sizeName(LABEL_SIZES, prefs.labelSizeSp()) + " \u00B7 " + prefs.labelSizeSp() + " sp", null,
+                run(new Runnable() {
+                    @Override public void run() {
+                        showSizePicker(SIZE_LABEL);
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_apps, null, "Icon size",
+                sizeName(ICON_SIZES, prefs.iconSizeDp()) + " \u00B7 " + prefs.iconSizeDp() + " dp", null,
+                run(new Runnable() {
+                    @Override public void run() {
+                        showSizePicker(SIZE_ICON);
+                    }
+                })));
+        c.addView(m3.listItem(R.drawable.ic_schedule, null, "Clock size",
+                sizeName(CLOCK_SIZES, prefs.clockSizeSp()) + " \u00B7 " + prefs.clockSizeSp() + " sp", null,
+                run(new Runnable() {
+                    @Override public void run() {
+                        showSizePicker(SIZE_CLOCK);
                     }
                 })));
         c.addView(switchItem(R.drawable.ic_apps, "Icons on home screen", "Show app icons next to names",
@@ -1426,8 +1565,16 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                         showHiddenApps();
                     }
                 })));
-        c.addView(m3.listItem(R.drawable.ic_notifications, null, "Notification dots",
-                NotificationDotService.isEnabled(this) ? "On" : "Off · needs notification access", null,
+        c.addView(switchItem(R.drawable.ic_notifications, "Message previews",
+                "Show the newest notification under home screen apps", prefs.messagePreviews(), new Toggle() {
+                    @Override public void set(boolean on) {
+                        prefs.setMessagePreviews(on);
+                        renderFavorites();
+                    }
+                }));
+        c.addView(m3.listItem(R.drawable.ic_notifications, null, "Notification badges",
+                NotificationDotService.isEnabled(this) ? "On \u00B7 counts show on every app"
+                        : "Off \u00B7 tap to allow notification access", null,
                 run(new Runnable() {
                     @Override public void run() {
                         safeStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
@@ -1542,8 +1689,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private static final class Row {
         ImageView icon;
+        LinearLayout texts;
         TextView label;
-        View dot;
+        TextView preview;
+        TextView badge;
         AppInfo app;
         String webQuery;
     }
@@ -1566,6 +1715,20 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         }
     };
 
+    private float labelSizeSp(int style) {
+        int home = prefs.labelSizeSp();
+        if (style == STYLE_PANEL) return home + 2;
+        if (style == STYLE_DRAWER) return Math.max(15, Math.round(home * 0.78f));
+        return home;
+    }
+
+    private int iconSizeDp(int style) {
+        int home = prefs.iconSizeDp();
+        if (style == STYLE_PANEL) return home + 4;
+        if (style == STYLE_DRAWER) return home + 6;
+        return home;
+    }
+
     private View createRow(int style) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1576,29 +1739,40 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
         Row r = new Row();
         r.icon = new ImageView(this);
-        int size = dp(style == STYLE_DRAWER ? 36 : style == STYLE_PANEL ? 34 : 30);
+        int size = dp(iconSizeDp(style));
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(size, size);
         ip.rightMargin = dp(style == STYLE_DRAWER ? 16 : 18);
         row.addView(r.icon, ip);
 
+        r.texts = new LinearLayout(this);
+        r.texts.setOrientation(LinearLayout.VERTICAL);
         r.label = new TextView(this);
-        r.label.setTextSize(TypedValue.COMPLEX_UNIT_SP, style == STYLE_DRAWER ? 18 : style == STYLE_PANEL ? 25 : 23);
+        r.label.setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSizeSp(style));
         r.label.setTypeface(style == STYLE_DRAWER ? Fonts.regular : Fonts.medium);
         r.label.setSingleLine(true);
         r.label.setEllipsize(TextUtils.TruncateAt.END);
         if (style == STYLE_HOME) styleText(r.label, theme.text);
         else r.label.setTextColor(theme.text);
-        row.addView(r.label, new LinearLayout.LayoutParams(
+        r.texts.addView(r.label);
+        r.preview = new TextView(this);
+        r.preview.setTextSize(TypedValue.COMPLEX_UNIT_SP, Math.max(13, labelSizeSp(style) * 0.6f));
+        r.preview.setTypeface(Fonts.regular);
+        r.preview.setSingleLine(true);
+        r.preview.setEllipsize(TextUtils.TruncateAt.END);
+        r.preview.setMaxWidth(dp(260));
+        if (style == STYLE_HOME) styleText(r.preview, theme.textSecondary);
+        else r.preview.setTextColor(theme.textSecondary);
+        r.preview.setVisibility(View.GONE);
+        r.texts.addView(r.preview);
+        row.addView(r.texts, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        r.dot = new View(this);
-        GradientDrawable dot = new GradientDrawable();
-        dot.setShape(GradientDrawable.OVAL);
-        dot.setColor(theme.accent);
-        r.dot.setBackground(dot);
-        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(7), dp(7));
-        dotLp.leftMargin = dp(10);
-        row.addView(r.dot, dotLp);
+        r.badge = m3.badge();
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(16));
+        bp.leftMargin = dp(10);
+        bp.gravity = Gravity.CENTER_VERTICAL;
+        row.addView(r.badge, bp);
+        r.badge.setVisibility(View.GONE);
 
         row.setTag(r);
         row.setOnClickListener(rowClick);
@@ -1616,7 +1790,12 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.icon.setVisibility(style == STYLE_HOME && !prefs.showHomeIcons() ? View.GONE : View.VISIBLE);
         r.label.setText(app.label);
         r.label.setTextColor(theme.text);
-        r.dot.setVisibility(NotificationDotService.hasDot(app.packageName()) ? View.VISIBLE : View.GONE);
+        M3.setBadgeCount(r.badge, NotificationDotService.count(app.packageName()));
+        // Home screen apps show the newest message under their name, like a quiet inbox.
+        String preview = style == STYLE_HOME && prefs.messagePreviews() && !editMode
+                ? NotificationDotService.preview(app.packageName()) : null;
+        r.preview.setText(preview);
+        r.preview.setVisibility(preview == null ? View.GONE : View.VISIBLE);
     }
 
     private void bindWebRow(View v, String query) {
@@ -1628,7 +1807,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         r.icon.setImageTintList(ColorStateList.valueOf(theme.text));
         r.icon.setVisibility(View.VISIBLE);
         r.label.setText("Search the web for “" + query + "”");
-        r.dot.setVisibility(View.GONE);
+        r.badge.setVisibility(View.GONE);
+        r.preview.setVisibility(View.GONE);
     }
 
     // --------------------------------------------------------- adapter

@@ -56,6 +56,8 @@ final class TopCards {
     private final LinearLayout dots;
     private final float density;
     private final List<String> cards;
+    /** Badges on app-card icons, refreshed in place when notifications change. */
+    private final List<TextView> badges = new ArrayList<>();
 
     TopCards(Activity activity, Prefs prefs, M3 m, Host host, WidgetBinder binder,
              CardPager pager, LinearLayout dots) {
@@ -96,6 +98,7 @@ final class TopCards {
     void render() {
         int current = pager.currentIndex();
         pager.removeAllViews();
+        badges.clear();
         View clock = host.clockContent();
         if (clock.getParent() != null) ((ViewGroup) clock.getParent()).removeView(clock);
 
@@ -171,8 +174,8 @@ final class TopCards {
     }
 
     /**
-     * Holds the clock card's content at its natural height and scales it down if it's taller than
-     * the card (large font sizes, short cards), so the world clocks are never cut off.
+     * Holds the clock card's content at its natural height: centred vertically when it fits, scaled
+     * down when it's taller than the card (large clock sizes, short cards).
      */
     private static final class FitFrame extends FrameLayout {
         FitFrame(android.content.Context context) {
@@ -190,9 +193,10 @@ final class TopCards {
         @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
             View c = getChildAt(0);
             if (c == null) return;
-            c.layout(0, 0, c.getMeasuredWidth(), c.getMeasuredHeight());
             int avail = b - t;
             float scale = c.getMeasuredHeight() > avail && avail > 0 ? avail / (float) c.getMeasuredHeight() : 1f;
+            int top = scale < 1f ? 0 : (avail - c.getMeasuredHeight()) / 2;
+            c.layout(0, top, c.getMeasuredWidth(), top + c.getMeasuredHeight());
             c.setPivotX(0);
             c.setPivotY(0);
             c.setScaleX(scale);
@@ -218,7 +222,10 @@ final class TopCards {
     private View widgetCard(final int appWidgetId) {
         final WidgetHostView view = binder.createView(appWidgetId);
         if (view == null) return null;
+        // Most widgets draw their own background; a second one behind it looks muddy, so the card
+        // only clips the widget to the rounded shape.
         final FrameLayout card = roundedCard();
+        card.setBackground(null);
         if (theme.grayscale) card.setLayerType(View.LAYER_TYPE_HARDWARE, Theme.grayscaleLayerPaint());
         card.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -233,7 +240,13 @@ final class TopCards {
                 if (r - l == or - ol && b - t == ob - ot) return;
                 int w = Math.round((r - l) / density), h = Math.round((b - t) / density);
                 try {
-                    view.updateAppWidgetSize(null, w, h, w, h);
+                    // Exact size lets responsive widgets (Android 12+) pick the layout that fills the card.
+                    if (android.os.Build.VERSION.SDK_INT >= 31) {
+                        view.updateAppWidgetSize(new android.os.Bundle(),
+                                Collections.singletonList(new android.util.SizeF(w, h)));
+                    } else {
+                        view.updateAppWidgetSize(null, w, h, w, h);
+                    }
                 } catch (RuntimeException ignored) {
                 }
             }
@@ -248,64 +261,84 @@ final class TopCards {
             if (a != null) apps.add(a);
         }
         FrameLayout card = roundedCard();
+        if (keys.isEmpty()) {
+            TextView t = m.text("Long-press to choose apps", M3.BODY_LARGE, theme.textSecondary);
+            t.setGravity(Gravity.CENTER);
+            card.addView(t, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            return card;
+        }
+        if (apps.isEmpty()) return card;
+
+        // Pick a grid that suits the count, then size icons to the space each cell gets.
+        int n = apps.size();
+        int columns = n <= 4 ? n : n <= 6 ? 3 : 4;
+        int rows = (n + columns - 1) / columns;
+        int pad = 12;
+        float cardW = activity.getResources().getDisplayMetrics().widthPixels / density - 74 - pad * 2;
+        float cardH = prefs.cardHeightDp() - pad * 2;
+        float cellW = cardW / columns;
+        float cellH = cardH / rows;
+        boolean showLabels = cellH >= 76;
+        float labelSpace = showLabels ? 26 : 0;
+        int iconDp = Math.round(Math.min(cellW * 0.62f, (cellH - labelSpace - 16) * 0.9f));
+        iconDp = Math.max(32, Math.min(76, iconDp));
+
         LinearLayout grid = new LinearLayout(activity);
         grid.setOrientation(LinearLayout.VERTICAL);
-        grid.setGravity(Gravity.CENTER);
-        grid.setPadding(dp(12), dp(12), dp(12), dp(12));
-        if (keys.isEmpty()) {
-            TextView t = new TextView(activity);
-            t.setText("Long-press to choose apps");
-            t.setTextColor(theme.textSecondary);
-            t.setTypeface(Fonts.regular);
-            t.setGravity(Gravity.CENTER);
-            grid.addView(t);
-        }
-        int columns = apps.size() <= 3 ? Math.max(1, apps.size()) : 4;
-        for (int start = 0; start < apps.size(); start += columns) {
-            LinearLayout row = new LinearLayout(activity);
-            row.setOrientation(LinearLayout.HORIZONTAL);
+        grid.setPadding(dp(pad), dp(pad), dp(pad), dp(pad));
+        for (int row = 0; row < rows; row++) {
+            LinearLayout line = new LinearLayout(activity);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            // Every cell gets 1/columns of the width; a short last row is centred, not left-aligned.
+            line.setWeightSum(columns);
+            line.setGravity(Gravity.CENTER);
             for (int c = 0; c < columns; c++) {
-                int i = start + c;
-                View cell = i < apps.size() ? appCell(apps.get(i), apps.size() <= 3) : new View(activity);
-                row.addView(cell, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                int i = row * columns + c;
+                if (i >= n) break;
+                line.addView(appCell(apps.get(i), iconDp, showLabels),
+                        new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
             }
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = lp.bottomMargin = dp(4);
-            grid.addView(row, lp);
+            grid.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         }
         card.addView(grid, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         return card;
     }
 
-    private View appCell(final AppInfo app, boolean large) {
+    private View appCell(final AppInfo app, int iconDp, boolean showLabel) {
         LinearLayout cell = new LinearLayout(activity);
         cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER_HORIZONTAL);
-        cell.setPadding(dp(4), dp(8), dp(4), dp(8));
-        GradientDrawable mask = new GradientDrawable();
-        mask.setColor(Color.WHITE);
-        mask.setCornerRadius(dp(18));
-        cell.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x33FFFFFF), null, mask));
+        cell.setGravity(Gravity.CENTER);
+        cell.setPadding(dp(4), dp(4), dp(4), dp(4));
+        cell.setBackground(m.ripple(theme.text, null, 20));
+
+        // Icon with a notification badge on its top-right corner.
+        FrameLayout iconBox = new FrameLayout(activity);
         ImageView icon = new ImageView(activity);
         icon.setImageDrawable(app.icon);
         if (theme.grayscale) icon.setColorFilter(Theme.grayscaleFilter());
-        int s = dp(large ? 56 : 46);
-        cell.addView(icon, new LinearLayout.LayoutParams(s, s));
-        TextView label = new TextView(activity);
-        label.setText(app.label);
-        label.setTextColor(theme.text);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, large ? 14 : 12);
-        label.setTypeface(Fonts.medium);
-        label.setSingleLine(true);
-        label.setEllipsize(TextUtils.TruncateAt.END);
-        label.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
-        cell.addView(label, lp);
+        iconBox.addView(icon, new FrameLayout.LayoutParams(dp(iconDp), dp(iconDp), Gravity.CENTER));
+        TextView badge = m.badge();
+        badge.setTag(app.packageName());
+        M3.setBadgeCount(badge, NotificationDotService.count(app.packageName()));
+        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP | Gravity.END);
+        iconBox.addView(badge, blp);
+        badges.add(badge);
+        cell.addView(iconBox, new LinearLayout.LayoutParams(dp(iconDp + 10), dp(iconDp + 6)));
+
+        if (showLabel) {
+            TextView label = m.text(app.label, M3.LABEL_MEDIUM, theme.text);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, iconDp >= 56 ? 13 : 12);
+            label.setSingleLine(true);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            label.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(6);
+            cell.addView(label, lp);
+        }
         cell.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 host.launch(app, v);
@@ -318,6 +351,11 @@ final class TopCards {
             }
         });
         return cell;
+    }
+
+    /** Refreshes app-card badges after notifications change, without rebuilding the cards. */
+    void updateBadges() {
+        for (TextView b : badges) M3.setBadgeCount(b, NotificationDotService.count((String) b.getTag()));
     }
 
     // ------------------------------------------------------------- edit
@@ -438,18 +476,6 @@ final class TopCards {
                 });
     }
 
-    /** Scrolls to the clock card, re-adding it first if it was removed. */
-    void showClockCard() {
-        int i = cards.indexOf(CLOCK);
-        if (i < 0) {
-            cards.add(0, CLOCK);
-            save();
-            render();
-            i = 0;
-        }
-        pager.setCurrent(i);
-    }
-
     void showHeight(final Runnable after) {
         final int original = prefs.cardHeightDp();
         final int[] chosen = {original};
@@ -492,6 +518,7 @@ final class TopCards {
         sheet.onDismiss(new Runnable() {
             @Override public void run() {
                 if (!saved[0]) setPagerHeight(original);
+                else render(); // app cards re-fit their grid to the new height
                 if (after != null) after.run();
             }
         });

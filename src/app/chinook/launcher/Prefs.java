@@ -24,6 +24,11 @@ final class Prefs {
     private static final String CARDS = "cards";
     private static final String CARD_HEIGHT = "card_height";
     private static final String LOCK_NOTE = "lock_note";
+    private static final String LABEL_SIZE = "label_size_sp";
+    private static final String ICON_SIZE = "icon_size_dp";
+    private static final String CLOCK_SIZE = "clock_size_sp";
+    private static final String PREVIEWS = "message_previews";
+    private static final String ASKED_DOTS = "asked_dots";
 
     private final SharedPreferences sp;
 
@@ -119,6 +124,48 @@ final class Prefs {
 
     void setCardHeightDp(int dp) {
         sp.edit().putInt(CARD_HEIGHT, dp).apply();
+    }
+
+    /** Home-screen app name size in sp; drawer and pop-out sizes follow it. */
+    int labelSizeSp() {
+        return sp.getInt(LABEL_SIZE, 23);
+    }
+
+    void setLabelSizeSp(int sp) {
+        this.sp.edit().putInt(LABEL_SIZE, sp).apply();
+    }
+
+    /** Home-screen icon size in dp; drawer and pop-out sizes follow it. */
+    int iconSizeDp() {
+        return sp.getInt(ICON_SIZE, 30);
+    }
+
+    void setIconSizeDp(int dp) {
+        sp.edit().putInt(ICON_SIZE, dp).apply();
+    }
+
+    int clockSizeSp() {
+        return sp.getInt(CLOCK_SIZE, 68);
+    }
+
+    void setClockSizeSp(int sp) {
+        this.sp.edit().putInt(CLOCK_SIZE, sp).apply();
+    }
+
+    boolean messagePreviews() {
+        return sp.getBoolean(PREVIEWS, true);
+    }
+
+    void setMessagePreviews(boolean on) {
+        sp.edit().putBoolean(PREVIEWS, on).apply();
+    }
+
+    boolean askedDots() {
+        return sp.getBoolean(ASKED_DOTS, false);
+    }
+
+    void setAskedDots() {
+        sp.edit().putBoolean(ASKED_DOTS, true).apply();
     }
 
     String lockNote() {

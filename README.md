@@ -7,14 +7,14 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
 ## Features
 
 - **Top card slider**: the top of the home screen is a row of swipeable cards: the clock card
-  (time, date, next alarm, world clocks), any widgets (weather, calendar, wallet…) and app-shortcut
-  cards (up to 8 apps each). Add as many as you like; with 3+ cards it loops endlessly. Long-press a
+  (time, date, next alarm), any widgets (weather, calendar, wallet…) and app-shortcut
+  cards (up to 8 apps each, with icons sized to fill the card). Add as many as you like; with 3+ cards it loops endlessly. Long-press a
   card to move, remove or add cards, choose its apps, or change the card height.
 - **Home apps**: your favourites sit low on the screen as a big text list, within thumb reach.
 - **Letter pop-out**: slide along the ★ / # / A–Z strip on the right. ★ shows your home apps. The letters ripple outward, and that
   letter's apps fan out beside your finger. Slide left onto an app and let go to open it, or let go
   on the strip to keep the list open and tap.
-- **World clocks**: add any cities. Each shows its local time, with +1/−1 when it's a different day.
+- **World clocks**: a row of cities just under the top cards. Add any cities. Each shows its local time, with +1/−1 when it's a different day.
 - **Lock screen designer**: generated minimal wallpapers (Aurora, Dusk, Ocean, Graphite, Midnight,
   Dark waves, Pure black, Mono waves, Horizon, Mono grain) with an optional note line, applied to
   the lock screen or both screens. Android still draws the lock-screen clock itself.
@@ -31,7 +31,10 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
   and font choosers, and Material You colours on Android 12+.
 - **Search everywhere**: every picker (home apps, app cards, widgets, world clocks, hidden apps)
   has a search box; already-chosen items are listed first.
-- Optional notification dots, hidden apps, work-profile support, Manrope or system font.
+- **Notifications on apps**: unread count badges on every app (home, pop-out, drawer, app cards)
+  and the newest message under home screen apps (needs notification access; Chinook asks once).
+- **Sizes**: text, icon and clock size choosers, each option previewed with its exact size.
+- Hidden apps, work-profile support, Manrope or system font.
 
 ## Install
 
