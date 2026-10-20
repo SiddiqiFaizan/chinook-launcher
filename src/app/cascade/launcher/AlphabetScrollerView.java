@@ -4,6 +4,7 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -18,6 +19,9 @@ import java.util.List;
  * onto the letter's app list. Letters near the finger bulge outward in a wave.
  */
 public final class AlphabetScrollerView extends View {
+    /** Section key for favourites; drawn as a star at the top of the strip. */
+    static final String STAR = "\u2605";
+
     interface Listener {
         void onScrubStart();
         /** y is the centre of the selected letter, in this view's coordinates. */
@@ -32,6 +36,7 @@ public final class AlphabetScrollerView extends View {
     private static final float WAVE_SHIFT_DP = 44f;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path starPath = new Path();
     private final float density;
     private final float scaledDensity;
     private String[] letters = new String[0];
@@ -112,10 +117,28 @@ public final class AlphabetScrollerView extends View {
             paint.setTextSize(baseSize * (1 + 0.9f * w));
             paint.setColor(isSelected ? accentColor : textColor);
             paint.setAlpha(isSelected ? 255 : (int) (150 + 105 * w));
-            Paint.FontMetrics fm = paint.getFontMetrics();
-            float baseline = y - (fm.ascent + fm.descent) / 2f;
-            canvas.drawText(letters[i], baseX - shift * w, baseline, paint);
+            if (STAR.equals(letters[i])) {
+                drawStar(canvas, baseX - shift * w, y, paint.getTextSize() * 0.5f);
+            } else {
+                Paint.FontMetrics fm = paint.getFontMetrics();
+                float baseline = y - (fm.ascent + fm.descent) / 2f;
+                canvas.drawText(letters[i], baseX - shift * w, baseline, paint);
+            }
         }
+    }
+
+    private void drawStar(Canvas canvas, float cx, float cy, float r) {
+        starPath.reset();
+        for (int k = 0; k < 10; k++) {
+            double a = -Math.PI / 2 + k * Math.PI / 5;
+            float rr = k % 2 == 0 ? r : r * 0.45f;
+            float x = cx + (float) (Math.cos(a) * rr);
+            float y = cy + (float) (Math.sin(a) * rr);
+            if (k == 0) starPath.moveTo(x, y);
+            else starPath.lineTo(x, y);
+        }
+        starPath.close();
+        canvas.drawPath(starPath, paint);
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {

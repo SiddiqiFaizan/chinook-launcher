@@ -6,16 +6,20 @@ APIs: no AndroidX, no Gradle, no tracking, no network permission. The APK is abo
 
 ## Features
 
-- **Home screen**: large clock, date and next alarm (tap them for alarms or calendar). Your
-  favourite apps sit low on the screen as a big text list, within thumb reach.
-- **Letter pop-out**: slide along the A–Z strip on the right. The letters ripple outward, and that
+- **Top card slider**: the top of the home screen is a row of swipeable cards: the clock card
+  (time, date, next alarm, world clocks), any widgets (weather, calendar, wallet…) and app-shortcut
+  cards (up to 8 apps each). Add as many as you like; with 3+ cards it loops endlessly. Long-press a
+  card to move, remove or add cards, choose its apps, or change the card height.
+- **Home apps**: your favourites sit low on the screen as a big text list, within thumb reach.
+- **Letter pop-out**: slide along the ★ / # / A–Z strip on the right. ★ shows your home apps. The letters ripple outward, and that
   letter's apps fan out beside your finger. Slide left onto an app and let go to open it, or let go
   on the strip to keep the list open and tap.
 - **World clocks**: add any cities. Each shows its local time, with +1/−1 when it's a different day.
-- **Widgets**: add any widget from the home screen. Long-press one to resize it (slider), move it
-  up or down, or remove it. Widgets scroll if there are more than fit.
+- **Lock screen designer**: generated minimal wallpapers (Aurora, Dusk, Ocean, Graphite, Midnight,
+  Dark waves, Pure black, Mono waves, Horizon, Mono grain) with an optional note line, applied to
+  the lock screen or both screens. Android still draws the lock-screen clock itself.
 - **Edit mode**: long-press empty space → *Edit home screen*. Reorder (↑ ↓) or remove (✕) home
-  apps, and add apps, widgets and clocks from one bar.
+  apps, and add apps, top cards and clocks from one bar.
 - **Themes**: *Colored* (wallpaper + blue accent), *Dark* (dimmed wallpaper, muted grey accent),
   *Black & White* (pure black AMOLED background, grayscale icons and widgets).
 - **Search**: swipe up. Matches are ranked by prefix, then word prefix, then substring. Press *Go*
@@ -53,7 +57,10 @@ res/                         theme, colours, adaptive icon
 assets/fonts/                Manrope (SIL Open Font License)
 src/app/cascade/launcher/
   MainActivity.java          home screen, letter pop-out, drawer, edit mode, menus, settings
-  WidgetController.java      widget host: pick, bind, configure, resize, reorder, remove
+  TopCards.java              top card slider: clock, widget and app cards; add/move/remove
+  CardPager.java             endless horizontal pager
+  WidgetBinder.java          widget host: pick, bind, configure
+  LockScreenDesigner.java    lock-screen wallpaper styles
   WidgetHostView.java        widget view that catches long-press
   WorldClocks.java           time-zone list, names, day offsets
   Theme.java                 Colored / Dark / Black & White palettes

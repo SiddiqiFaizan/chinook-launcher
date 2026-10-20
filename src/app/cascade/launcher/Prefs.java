@@ -21,6 +21,9 @@ final class Prefs {
     private static final String WORLD_CLOCKS = "world_clocks";
     private static final String WIDGETS = "widgets";
     private static final String SHOW_ALARM = "show_alarm";
+    private static final String CARDS = "cards";
+    private static final String CARD_HEIGHT = "card_height";
+    private static final String LOCK_NOTE = "lock_note";
 
     private final SharedPreferences sp;
 
@@ -97,7 +100,36 @@ final class Prefs {
         putList(WORLD_CLOCKS, zones);
     }
 
-    /** Widgets as "appWidgetId:heightDp" entries, top to bottom. */
+    boolean hasCards() {
+        return sp.contains(CARDS);
+    }
+
+    /** Top slider cards: "clock", "widget:<appWidgetId>" or "apps:<key>|<key>|...". */
+    List<String> cards() {
+        return getList(CARDS);
+    }
+
+    void setCards(List<String> cards) {
+        putList(CARDS, cards);
+    }
+
+    int cardHeightDp() {
+        return sp.getInt(CARD_HEIGHT, 250);
+    }
+
+    void setCardHeightDp(int dp) {
+        sp.edit().putInt(CARD_HEIGHT, dp).apply();
+    }
+
+    String lockNote() {
+        return sp.getString(LOCK_NOTE, "");
+    }
+
+    void setLockNote(String note) {
+        sp.edit().putString(LOCK_NOTE, note).apply();
+    }
+
+    /** v2 home widgets as "appWidgetId:heightDp"; read once to migrate them into cards. */
     List<String> widgets() {
         return getList(WIDGETS);
     }

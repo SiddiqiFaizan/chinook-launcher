@@ -75,7 +75,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity implements AppRepository.Listener,
-        AlphabetScrollerView.Listener, NotificationDotService.Listener {
+        AlphabetScrollerView.Listener, NotificationDotService.Listener, TopCards.Host {
 
     private static final int MAX_SHORTCUTS = 5;
     private static final int REQUEST_HOME_ROLE = 1;
@@ -87,7 +87,8 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private Prefs prefs;
     private Theme theme;
     private AppRepository repo;
-    private WidgetController widgets;
+    private WidgetBinder widgetBinder;
+    private TopCards topCards;
     private float density;
 
     private List<AppInfo> rawApps = new ArrayList<>();
@@ -99,12 +100,13 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private FrameLayout root;
     private LinearLayout home;
     private View clockBlock;
+    private LinearLayout clockContent;
+    private CardPager pager;
+    private LinearLayout pagerDots;
     private TextView alarmView;
     private HorizontalScrollView worldScroll;
     private LinearLayout worldRow;
     private final List<TextView> worldOffsetViews = new ArrayList<>();
-    private ScrollView widgetScroll;
-    private LinearLayout widgetContainer;
     private LinearLayout favoritesContainer;
     private View editBar;
 
@@ -153,8 +155,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         setContentView(root);
         setupGestures();
 
-        widgets = new WidgetController(this, prefs, theme, widgetContainer);
-        widgets.render();
+        widgetBinder = new WidgetBinder(this, theme);
+        topCards = new TopCards(this, prefs, theme, this, widgetBinder, pager, pagerDots);
+        topCards.render();
         renderWorldClocks();
         updateAlarm();
 
@@ -170,7 +173,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     @Override protected void onStart() {
         super.onStart();
-        widgets.startListening();
+        widgetBinder.startListening();
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_TIME_TICK);
         f.addAction(Intent.ACTION_TIME_CHANGED);
@@ -185,7 +188,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     }
 
     @Override protected void onStop() {
-        widgets.stopListening();
+        widgetBinder.stopListening();
         if (receiverRegistered) {
             unregisterReceiver(timeReceiver);
             receiverRegistered = false;
@@ -221,7 +224,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        widgets.onActivityResult(requestCode, resultCode);
+        widgetBinder.onActivityResult(requestCode, resultCode);
     }
 
     // ---------------------------------------------------------------- UI
@@ -284,9 +287,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         alarmLp.topMargin = dp(4);
         header.addView(alarmView, alarmLp);
         clockBlock = header;
+        clockContent = new LinearLayout(this);
+        clockContent.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams headerLp = wrap();
-        headerLp.topMargin = dp(40);
-        home.addView(header, headerLp);
+        headerLp.topMargin = dp(12);
+        clockContent.addView(header, headerLp);
 
         // World clocks.
         worldScroll = new HorizontalScrollView(this);
@@ -299,19 +304,23 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         LinearLayout.LayoutParams worldLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         worldLp.topMargin = dp(22);
-        home.addView(worldScroll, worldLp);
+        clockContent.addView(worldScroll, worldLp);
 
-        // Widgets fill the flexible middle and scroll if they overflow.
-        widgetScroll = new ScrollView(this);
-        widgetScroll.setVerticalScrollBarEnabled(false);
-        widgetScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        widgetScroll.setClipToPadding(false);
-        widgetScroll.setPadding(0, dp(24), 0, dp(8));
-        widgetContainer = new LinearLayout(this);
-        widgetContainer.setOrientation(LinearLayout.VERTICAL);
-        widgetScroll.addView(widgetContainer, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        home.addView(widgetScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        // Top slider: clock, widgets and app cards; swipe sideways, loops with 3+ cards.
+        pager = new CardPager(this);
+        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(prefs.cardHeightDp()));
+        pagerLp.topMargin = dp(20);
+        home.addView(pager, pagerLp);
+        pagerDots = new LinearLayout(this);
+        pagerDots.setOrientation(LinearLayout.HORIZONTAL);
+        pagerDots.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams dotsLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(18));
+        dotsLp.topMargin = dp(8);
+        home.addView(pagerDots, dotsLp);
+
+        home.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
 
         // Favourites, low on the screen within thumb reach.
         favoritesContainer = new LinearLayout(this);
@@ -433,9 +442,9 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                 showFavoritesPicker();
             }
         }));
-        bar.addView(editButton("+ Widget", false, new View.OnClickListener() {
+        bar.addView(editButton("+ Top card", false, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                widgets.showPicker();
+                topCards.showAddCard();
             }
         }));
         bar.addView(editButton("+ Clock", false, new View.OnClickListener() {
@@ -486,8 +495,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             }
 
             @Override public void onLongPress(MotionEvent e) {
-                if (hitsChild(favoritesContainer, e) || hitsView(clockBlock, e) || hitsChild(worldRow, e)
-                        || hitsChild(widgetContainer, e) || hitsView(editBar, e)) return;
+                if (hitsChild(favoritesContainer, e) || hitsView(pager, e) || hitsView(editBar, e)) return;
                 root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                 showHomeMenu();
             }
@@ -510,7 +518,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
             gestureStreamIgnored = panelOpen
                     || scroller.isInStrip(ev.getX())
-                    || (!drawerOpen && widgetContainer.getChildCount() > 0 && hitsChild(widgetContainer, ev));
+                    || (!drawerOpen && topCards.isWidgetCardShowing() && hitsView(pager, ev));
         }
         if (!gestureStreamIgnored) {
             (drawerOpen ? drawerGestures : homeGestures).onTouchEvent(ev);
@@ -530,18 +538,20 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         }
         appsLoaded = true;
         applyApps();
+        topCards.render();
     }
 
     private void applyApps() {
         Set<String> hidden = prefs.hidden();
         visibleApps = new ArrayList<>();
         LinkedHashSet<String> sections = new LinkedHashSet<>();
+        if (!favoriteApps().isEmpty()) sections.add(AlphabetScrollerView.STAR);
         for (AppInfo a : rawApps) {
             if (hidden.contains(a.key)) continue;
             visibleApps.add(a);
             sections.add(a.section);
         }
-        adapter.setApps(visibleApps);
+        adapter.setApps(visibleApps, favoriteApps());
         scroller.setLetters(new ArrayList<>(sections));
         renderFavorites();
     }
@@ -578,7 +588,17 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     private void saveFavorites() {
         prefs.setFavorites(favorites);
-        renderFavorites();
+        applyApps();
+    }
+
+    /** Home-screen favourites, in home order; these also make up the ★ section. */
+    private List<AppInfo> favoriteApps() {
+        List<AppInfo> out = new ArrayList<>();
+        for (String k : favorites) {
+            AppInfo a = byKey.get(k);
+            if (a != null) out.add(a);
+        }
+        return out;
     }
 
     private void renderFavorites() {
@@ -653,7 +673,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         editBar.setVisibility(on ? View.VISIBLE : View.GONE);
         renderFavorites();
         renderWorldClocks();
-        if (on) Toast.makeText(this, "Long-press a widget or clock to change it", Toast.LENGTH_SHORT).show();
+        if (on) Toast.makeText(this, "Long-press a top card or clock to change it", Toast.LENGTH_SHORT).show();
     }
 
     @Override public void onDotsChanged() {
@@ -876,14 +896,16 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         if (letterChanged || panelList.getChildCount() == 0) {
             panelList.removeAllViews();
             TextView header = new TextView(this);
-            header.setText(letter);
+            boolean star = AlphabetScrollerView.STAR.equals(letter);
+            header.setText(star ? "\u2605  Favourites" : letter);
             header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             header.setTypeface(Fonts.medium);
             header.setPadding(dp(8), 0, 0, dp(6));
             header.setTextColor(theme.accent);
             panelList.addView(header, wrap());
-            for (AppInfo a : visibleApps) {
-                if (!a.section.equals(letter)) continue;
+            List<AppInfo> source = star ? favoriteApps() : visibleApps;
+            for (AppInfo a : source) {
+                if (!star && !a.section.equals(letter)) continue;
                 View row = createRow(STYLE_PANEL);
                 bindRow(row, a, STYLE_PANEL);
                 panelList.addView(row, wrap());
@@ -1027,7 +1049,7 @@ public class MainActivity extends Activity implements AppRepository.Listener,
 
     // --------------------------------------------------------- actions
 
-    private void launch(AppInfo app, View source) {
+    @Override public void launch(AppInfo app, View source) {
         try {
             repo.launch(app, source);
         } catch (ActivityNotFoundException | SecurityException e) {
@@ -1225,9 +1247,10 @@ public class MainActivity extends Activity implements AppRepository.Listener,
     private void showHomeMenu() {
         String[] items = {
                 "Edit home screen",
-                "Add widget",
+                "Add top card (widget or apps)",
                 "Add world clock",
                 "Theme: " + Theme.NAMES[theme.id],
+                "Lock screen",
                 "Wallpaper",
                 "More settings",
         };
@@ -1236,13 +1259,14 @@ public class MainActivity extends Activity implements AppRepository.Listener,
                     @Override public void onClick(DialogInterface d, int which) {
                         switch (which) {
                             case 0: setEditMode(true); break;
-                            case 1: widgets.showPicker(); break;
+                            case 1: topCards.showAddCard(); break;
                             case 2: showZonePicker(); break;
                             case 3: showThemePicker(); break;
-                            case 4:
+                            case 4: new LockScreenDesigner(MainActivity.this, prefs, theme).show(); break;
+                            case 5:
                                 safeStart(Intent.createChooser(new Intent(Intent.ACTION_SET_WALLPAPER), "Choose wallpaper"));
                                 break;
-                            case 5: showSettings(); break;
+                            case 6: showSettings(); break;
                         }
                     }
                 })
@@ -1358,6 +1382,24 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         return new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert);
     }
 
+    // ------------------------------------------------------- top cards
+
+    @Override public AppInfo findApp(String key) {
+        return byKey.get(key);
+    }
+
+    @Override public List<AppInfo> visibleApps() {
+        return visibleApps;
+    }
+
+    @Override public void onAppLongPress(AppInfo app, View anchor) {
+        showAppMenu(app, anchor);
+    }
+
+    @Override public View clockContent() {
+        return clockContent;
+    }
+
     // ------------------------------------------------------------ rows
 
     private static final class Row {
@@ -1457,10 +1499,12 @@ public class MainActivity extends Activity implements AppRepository.Listener,
         private final List<Object> items = new ArrayList<>();
         private final Map<String, Integer> sectionPositions = new HashMap<>();
         private List<AppInfo> apps = new ArrayList<>();
+        private List<AppInfo> favs = new ArrayList<>();
         private String query = "";
 
-        void setApps(List<AppInfo> apps) {
+        void setApps(List<AppInfo> apps, List<AppInfo> favs) {
             this.apps = apps;
+            this.favs = favs;
             rebuild();
         }
 
@@ -1482,6 +1526,11 @@ public class MainActivity extends Activity implements AppRepository.Listener,
             items.clear();
             sectionPositions.clear();
             if (query.isEmpty()) {
+                if (!favs.isEmpty()) {
+                    sectionPositions.put(AlphabetScrollerView.STAR, 0);
+                    items.add(AlphabetScrollerView.STAR + "  Favourites");
+                    items.addAll(favs);
+                }
                 String last = null;
                 for (AppInfo a : apps) {
                     if (!a.section.equals(last)) {
